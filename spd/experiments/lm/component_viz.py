@@ -128,7 +128,7 @@ def main(path: ModelPath) -> None:
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
-        streaming=True,
+        streaming=False,
         column_name="story",
     )
 
