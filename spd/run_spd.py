@@ -233,8 +233,8 @@ def calc_component_acts(
     component_acts = {}
     for param_name in pre_weight_acts:
         raw_name = param_name.removesuffix(".hook_pre")
-        if pre_weight_acts[param_name].ndim == 2:
-            # Must be an embedding. TODO: Handle this much more cleanly in future
+        if not pre_weight_acts[param_name].dtype.is_floating_point:
+            # Must be token indices before an embedding layer
             acts = F.one_hot(pre_weight_acts[param_name], num_classes=As[raw_name].shape[0]).to(
                 dtype=As[raw_name].dtype
             )
