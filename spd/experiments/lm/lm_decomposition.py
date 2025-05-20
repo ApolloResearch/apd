@@ -2,10 +2,12 @@
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import einops
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,12 +15,14 @@ import torch.optim as optim
 import wandb
 import yaml
 from jaxtyping import Bool, Float
-from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
+from simple_stories_train.dataloaders import DatasetConfig
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
+from tokenizers import Tokenizer
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
 from spd.experiments.lm.component_viz import (
@@ -254,6 +258,68 @@ def calc_embedding_recon_loss_lm(
     return loss
 
 
+def create_random_token_loader(
+    dataset_config: DatasetConfig,
+    batch_size: int,
+    global_seed: int = 0,
+    n_unique_tokens: int | None = None,
+) -> tuple[DataLoader[Any], Tokenizer]:
+    """Create a DataLoader for the given dataset.
+
+    Args:
+        dataset_config: The configuration for the dataset.
+        batch_size: The batch size.
+        global_seed: Used for shuffling if dataset_config.seed is None.
+        n_unique_tokens: The number of unique tokens to use for the dataset. If None, use the entire
+            vocabulary.
+    Returns:
+        A tuple of the DataLoader and the tokenizer.
+    """
+    # Load tokenizer based on config
+    if dataset_config.hf_tokenizer_path is not None:
+        # Load from HuggingFace
+        tokenizer = AutoTokenizer.from_pretrained(
+            dataset_config.hf_tokenizer_path,
+            add_bos_token=False,
+            unk_token="[UNK]",
+            eos_token="[EOS]",
+            bos_token=None,
+        ).backend_tokenizer
+    elif dataset_config.tokenizer_file_path is not None:
+        # Load from local file
+        tokenizer = Tokenizer.from_file(dataset_config.tokenizer_file_path)
+    else:
+        raise ValueError("Either tokenizer_file_path or hf_tokenizer_path must be specified")
+
+    # Get vocab size
+    vocab_size = tokenizer.get_vocab_size() if n_unique_tokens is None else n_unique_tokens
+    n_ctx = dataset_config.n_ctx
+
+    class RandomTokenDataset(torch.utils.data.Dataset[dict[str, torch.Tensor]]):
+        def __init__(self, length: int = 100_000, seed: int = 0):
+            self.length = length
+            self.seed = seed
+            self.rng = np.random.default_rng(seed)
+
+        def __len__(self) -> int:
+            return self.length
+
+        def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+            # Optionally, reseed for reproducibility per worker
+            tokens = self.rng.integers(0, vocab_size, size=n_ctx, dtype=np.int64)
+            return {"input_ids": torch.tensor(tokens, dtype=torch.long)}
+
+    # Use a large enough length for the dataset (arbitrary, e.g. 100_000)
+    random_dataset = RandomTokenDataset(length=100_000, seed=global_seed)
+    loader = DataLoader(
+        random_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=True,
+    )
+    return loader, tokenizer
+
+
 def optimize_lm(
     model: SSModel,
     config: Config,
@@ -342,6 +408,10 @@ def optimize_lm(
                 dim=(0, 1)
             )
 
+        # # For the first 10 tokens in batch=0, get all values that are > 0.5
+        # for ma in masks["transformer.wte"][0, :100]:
+        #     l = ma[ma > 0.1].tolist()
+        #     print(l)
         # --- Calculate Losses --- #
         total_loss = torch.tensor(0.0, device=device)
         loss_terms = {}
@@ -575,9 +645,20 @@ def main(
 
     # --- Load Model --- #
     logger.info(f"Loading model: {config.task_config.model_size}")
-    model_config_dict = MODEL_CONFIGS[config.task_config.model_size]
+    model_config = MODEL_CONFIGS[config.task_config.model_size]
     model_path = f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}"
-    model = Llama.from_pretrained(model_path, model_config_dict)
+    model = Llama.from_pretrained(model_path, model_config)
+
+    n_unique_tokens = 1000
+    from spd.utils import replace_pydantic_model
+
+    model_config = replace_pydantic_model(model_config, {"vocab_size": n_unique_tokens})
+    # Change the weights of the embedding matrix to be of shape (n_unique_tokens, emb_dim) with
+    # random values
+    model.transformer.wte = nn.Embedding(
+        num_embeddings=model_config.vocab_size,
+        embedding_dim=model_config.n_embd,
+    )
 
     ss_model = SSModel(
         llama_model=model,
@@ -585,6 +666,15 @@ def main(
         m=config.m,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
+    ################## Load from pretrained instead #########################################
+    # pretrained_path = "wandb:spd-lm/runs/u4z3wmuu"
+    # pretrained_path = "wandb:spd-lm/runs/vya0axr3"
+    # pretrained_path = "wandb:spd-lm/runs/kvv81m4b"
+    # ss_model, config, checkpoint_path = SSModel.from_pretrained(pretrained_path)
+    # from spd.utils import replace_pydantic_model
+
+    # config = replace_pydantic_model(config, {"wandb_project": None})
+
     ss_model.to(device)
     logger.info("Model loaded.")
 
@@ -621,13 +711,19 @@ def main(
         column_name="story",
     )
 
-    train_loader, tokenizer = create_data_loader(
+    # train_loader, tokenizer = create_data_loader(
+    #     dataset_config=train_data_config,
+    #     batch_size=config.batch_size,
+    #     buffer_size=config.task_config.buffer_size,
+    #     global_seed=config.seed,
+    #     ddp_rank=0,
+    #     ddp_world_size=1,
+    # )
+    train_loader, tokenizer = create_random_token_loader(
         dataset_config=train_data_config,
         batch_size=config.batch_size,
-        buffer_size=config.task_config.buffer_size,
         global_seed=config.seed,
-        ddp_rank=0,
-        ddp_world_size=1,
+        n_unique_tokens=n_unique_tokens,
     )
 
     eval_data_config = DatasetConfig(
@@ -640,13 +736,19 @@ def main(
         streaming=False,
         column_name="story",
     )
-    eval_loader, _ = create_data_loader(
+    # eval_loader, _ = create_data_loader(
+    #     dataset_config=eval_data_config,
+    #     batch_size=config.batch_size,
+    #     buffer_size=config.task_config.buffer_size,
+    #     global_seed=config.seed,
+    #     ddp_rank=0,
+    #     ddp_world_size=1,
+    # )
+    eval_loader, _ = create_random_token_loader(
         dataset_config=eval_data_config,
         batch_size=config.batch_size,
-        buffer_size=config.task_config.buffer_size,
-        global_seed=config.seed,
-        ddp_rank=0,
-        ddp_world_size=1,
+        global_seed=config.seed + 1,
+        n_unique_tokens=n_unique_tokens,
     )
 
     logger.info("Dataset and tokenizer loaded.")

@@ -297,6 +297,18 @@ class SSModel(nn.Module):
         model_path = f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}"
         llama_model = Llama.from_pretrained(model_path, model_config_dict)
 
+        n_unique_tokens = 1000
+        from spd.utils import replace_pydantic_model
+
+        model_config_dict = replace_pydantic_model(
+            model_config_dict, {"vocab_size": n_unique_tokens}
+        )
+
+        llama_model.transformer.wte = nn.Embedding(
+            num_embeddings=model_config_dict.vocab_size,
+            embedding_dim=model_config_dict.n_embd,
+        )
+
         ss_model = SSModel(
             llama_model=llama_model,
             target_module_patterns=config.task_config.target_module_patterns,

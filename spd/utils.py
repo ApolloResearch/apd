@@ -60,12 +60,12 @@ def load_config(config_path_or_obj: Path | str | T, config_model: type[T]) -> T:
     if isinstance(config_path_or_obj, str):
         config_path_or_obj = Path(config_path_or_obj)
 
-    assert isinstance(
-        config_path_or_obj, Path
-    ), f"passed config is of invalid type {type(config_path_or_obj)}"
-    assert (
-        config_path_or_obj.suffix == ".yaml"
-    ), f"Config file {config_path_or_obj} must be a YAML file."
+    assert isinstance(config_path_or_obj, Path), (
+        f"passed config is of invalid type {type(config_path_or_obj)}"
+    )
+    assert config_path_or_obj.suffix == ".yaml", (
+        f"Config file {config_path_or_obj} must be a YAML file."
+    )
     assert Path(config_path_or_obj).exists(), f"Config file {config_path_or_obj} does not exist."
     with open(config_path_or_obj) as f:
         config_dict = yaml.safe_load(f)
