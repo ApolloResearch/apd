@@ -97,7 +97,6 @@ class SSModelPaths(BaseModel):
     """Paths to output files from a SSModel training run."""
 
     model: Path
-    optimizer: Path
     config: Path
 
 
@@ -263,11 +262,7 @@ class SSModel(nn.Module):
         # Get the step number from the path
         step = int(Path(checkpoint_path).stem.split("_")[-1])
 
-        return SSModelPaths(
-            model=checkpoint_path,
-            optimizer=download_wandb_file(run, run_dir, f"optimizer_{step}.pth"),
-            config=final_config_path,
-        )
+        return SSModelPaths(model=checkpoint_path, config=final_config_path)
 
     @classmethod
     def from_pretrained(cls, path: ModelPath) -> tuple["SSModel", Config, Path]:
@@ -279,13 +274,7 @@ class SSModel(nn.Module):
             out_dir = fetch_wandb_run_dir(run.id)
 
         else:
-            # Get the step number from the path
-            step = int(Path(path).stem.split("_")[-1])
-            paths = SSModelPaths(
-                model=Path(path),
-                optimizer=Path(path).parent / f"optimizer_{step}.pth",
-                config=Path(path).parent / "final_config.yaml",
-            )
+            paths = SSModelPaths(model=Path(path), config=Path(path).parent / "final_config.yaml")
             out_dir = Path(path).parent
 
         model_weights = torch.load(paths.model, map_location="cpu", weights_only=True)
