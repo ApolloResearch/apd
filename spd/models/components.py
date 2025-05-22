@@ -249,3 +249,70 @@ class TransposedLinearComponent(LinearComponent):
     def weight(self) -> Float[Tensor, "... d_out d_in"]:
         """A @ B"""
         return einops.einsum(self.A, self.B, "... d_out m, ... m d_in -> ... d_out d_in")
+
+
+class EmbeddingComponent(nn.Module):
+    """An efficient embedding component for SPD that avoids one-hot encoding."""
+
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        m: int,
+    ):
+        super().__init__()
+        self.m = m
+
+        # Initialize A and B matrices
+        shape_A = (vocab_size, m)
+        shape_B = (m, embedding_dim)
+        self.A = nn.Parameter(torch.empty(shape_A))
+        self.B = nn.Parameter(torch.empty(shape_B))
+        self.hook_pre = HookPoint()  # (batch d_in) or (batch n_instances d_in)
+        self.hook_component_acts = HookPoint()  # (batch m) or (batch n_instances m)
+        self.hook_post = HookPoint()  # (batch d_out) or (batch n_instances d_out)
+
+        # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
+        init_param_(self.A, fan_val=embedding_dim, nonlinearity="linear")
+        init_param_(self.B, fan_val=m, nonlinearity="linear")
+
+        # For sparse forward passes
+        self.mask: Float[Tensor, "batch pos m"] | None = None
+
+    @property
+    def weight(self) -> Float[Tensor, "vocab_size embedding_dim"]:
+        """A @ B"""
+        return einops.einsum(
+            self.A, self.B, "vocab_size m, ... m embedding_dim -> vocab_size embedding_dim"
+        )
+
+    @torch.compile
+    def forward(self, x: Float[Tensor, "batch pos"]) -> Float[Tensor, "batch pos embedding_dim"]:
+        """Forward through the embedding component using nn.Embedding for efficient lookup
+
+        NOTE: Unlike a LinearComponent, here we alter the mask with an instance attribute rather
+        than passing it in the forward pass. This is just because we only use this component in the
+        newer lm_decomposition.py setup which does monkey-patching of the modules rather than using
+        a SPDModel object.
+
+        Args:
+            x: Input tensor of token indices
+        """
+        x = self.hook_pre(x)
+
+        # From https://github.com/pytorch/pytorch/blob/main/torch/_decomp/decompositions.py#L1211
+        component_acts = self.A[x]  # (batch pos m)
+
+        # Apply mask if provided
+        if self.mask is not None:
+            component_acts *= self.mask
+
+        component_acts = self.hook_component_acts(component_acts)
+
+        # Apply B matrix to get final embeddings
+        out = einops.einsum(
+            component_acts, self.B, "batch pos m, ... m embedding_dim -> batch pos embedding_dim"
+        )
+
+        out = self.hook_post(out)
+        return out

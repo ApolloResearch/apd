@@ -48,7 +48,7 @@ def component_activation_statistics(
         _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
         )
-        As = {module_name: v.linear_component.A for module_name, v in components.items()}
+        As = {module_name: v.A for module_name, v in components.items()}
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 

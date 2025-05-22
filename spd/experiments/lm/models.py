@@ -9,7 +9,6 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import wandb
 import yaml
 from jaxtyping import Float
@@ -20,7 +19,7 @@ from torch import Tensor
 from wandb.apis.public import Run
 
 from spd.configs import Config, LMTaskConfig
-from spd.models.components import Gate, GateMLP, LinearComponent
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.wandb_utils import (
     download_wandb_file,
@@ -37,6 +36,9 @@ class LinearComponentWithBias(nn.Module):
         self.linear_component = linear_component
         self.bias = bias
         self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
+        self.A = linear_component.A
+        self.B = linear_component.B
+        self.weight = linear_component.weight
 
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         # Note: We assume bias is added *after* the component multiplication
@@ -60,37 +62,6 @@ def linear_module_to_component(
     # linear_component.B.data[:] = torch.eye(m)
     bias = linear_module.bias.clone() if linear_module.bias is not None else None  # type: ignore
     return LinearComponentWithBias(linear_component, bias)
-
-
-class EmbeddingComponent(nn.Module):
-    """A LinearComponent that first converts an index tensor to a one-hot encoding."""
-
-    def __init__(self, linear_component: LinearComponent):
-        super().__init__()
-        self.linear_component = linear_component
-        self.mask: Float[Tensor, "batch pos m"] | None = None  # Gets set on sparse forward passes
-
-    def forward(self, x: Float[Tensor, "batch pos"]):
-        one_hot = F.one_hot(x, num_classes=self.linear_component.A.shape[0]).to(
-            dtype=self.linear_component.A.dtype
-        )
-        out = self.linear_component(one_hot, mask=self.mask)
-
-        return out
-
-
-def embedding_module_to_component(
-    embedding_module: nn.Embedding,
-    m: int,
-) -> EmbeddingComponent:
-    """Convert an nn.Embedding into an EmbeddingComponent."""
-    linear_component = LinearComponent(
-        d_in=embedding_module.num_embeddings,
-        d_out=embedding_module.embedding_dim,
-        m=m,
-        n_instances=None,
-    )
-    return EmbeddingComponent(linear_component)
 
 
 class SSModelPaths(BaseModel):
@@ -135,8 +106,10 @@ class SSModel(nn.Module):
                         # Replace "." with "-" in the name to avoid issues with module dict keys
                         components[name.replace(".", "-")] = linear_module_to_component(module, m=m)
                     elif isinstance(module, nn.Embedding):
-                        components[name.replace(".", "-")] = embedding_module_to_component(
-                            module, m=m
+                        components[name.replace(".", "-")] = EmbeddingComponent(
+                            vocab_size=module.num_embeddings,
+                            embedding_dim=module.embedding_dim,
+                            m=m,
                         )
                     else:
                         raise ValueError(
@@ -258,9 +231,6 @@ class SSModel(nn.Module):
 
         final_config_path = download_wandb_file(run, run_dir, "final_config.yaml")
         checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
-
-        # Get the step number from the path
-        step = int(Path(checkpoint_path).stem.split("_")[-1])
 
         return SSModelPaths(model=checkpoint_path, config=final_config_path)
 

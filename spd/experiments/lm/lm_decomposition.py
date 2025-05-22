@@ -112,7 +112,7 @@ def calc_param_match_loss_lm(
     component_params: dict[str, Float[Tensor, "d_in d_out"]] = {}
 
     for comp_name, component in components.items():
-        component_params[comp_name] = component.linear_component.weight
+        component_params[comp_name] = component.weight
         submodule = target_model.get_submodule(comp_name)
         if isinstance(submodule, nn.Linear):
             target_params[comp_name] = submodule.weight.T
@@ -206,8 +206,8 @@ def calc_schatten_loss_lm(
 
     total_loss = torch.tensor(0.0, device=device)
     for component_name, component in components.items():
-        A_norms = component.linear_component.A.square().sum(dim=-2)
-        B_norms = component.linear_component.B.square().sum(dim=-1)
+        A_norms = component.A.square().sum(dim=-2)
+        B_norms = component.B.square().sum(dim=-1)
         schatten_norms = A_norms + B_norms
         loss = einops.einsum(
             relud_masks[component_name] ** pnorm, schatten_norms, "... m, m -> ..."
@@ -393,7 +393,7 @@ def optimize_lm(
         (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
         )
-        As = {module_name: v.linear_component.A for module_name, v in components.items()}
+        As = {module_name: v.A for module_name, v in components.items()}
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
