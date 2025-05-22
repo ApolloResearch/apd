@@ -47,7 +47,7 @@ def collect_embedding_masks(model: SSModel, device: str) -> Float[Tensor, "vocab
             token_tensor, module_names=[component_name]
         )
 
-        As = {module_name: v.linear_component.A for module_name, v in components.items()}
+        As = {module_name: v.A for module_name, v in components.items()}
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
         masks, _ = calc_masks(
@@ -64,7 +64,7 @@ def collect_embedding_masks(model: SSModel, device: str) -> Float[Tensor, "vocab
 
 def permute_to_identity(
     mask: Float[Tensor, "vocab m"],
-) -> tuple[Float[Tensor, "vocab m"], Float[Tensor, "vocab"]]:
+) -> tuple[Float[Tensor, "vocab m"], Float[Tensor, " vocab"]]:
     """Returns (permuted_mask, permutation_indices)"""
     vocab, m = mask.shape
     new_mask = mask.clone()
@@ -164,6 +164,7 @@ def main(model_path: str | Path) -> None:
 
 if __name__ == "__main__":
     # path = "wandb:spd-lm/runs/cllwvnmz" # Run with some components that always activate.
-    path = "wandb:spd-lm/runs/o1eqp841"  # Some components activate 0.175 of the time.
+    # path = "wandb:spd-lm/runs/o1eqp841"  # Some components activate 0.175 of the time.
+    path = "wandb:spd-lm/runs/1pcudrtk"  # 4k run
 
     main(path)
