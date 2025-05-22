@@ -464,7 +464,7 @@ def optimize_lm(
         #     model=model,
         #     batch=batch,
         #     component=component,
-        #     masks=masks_all_ones,
+        #     masks=[masks_all_ones],
         #     unembed=config.is_embed_unembed_recon,
         # )
         param_match_loss_val = calc_param_match_loss_lm(
@@ -702,7 +702,7 @@ def main(
     model_path = f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}"
     model = Llama.from_pretrained(model_path, model_config)
 
-    n_unique_tokens = 1000
+    n_unique_tokens = 4000
     from spd.utils import replace_pydantic_model
 
     model_config = replace_pydantic_model(model_config, {"vocab_size": n_unique_tokens})
