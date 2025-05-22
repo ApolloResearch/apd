@@ -296,7 +296,7 @@ def create_random_token_loader(
     n_ctx = dataset_config.n_ctx
 
     class RandomTokenDataset(torch.utils.data.Dataset[dict[str, torch.Tensor]]):
-        def __init__(self, length: int = 100_000, seed: int = 0):
+        def __init__(self, length: int = int(1e14), seed: int = 0):
             self.length = length
             self.seed = seed
             self.rng = np.random.default_rng(seed)
@@ -309,8 +309,8 @@ def create_random_token_loader(
             tokens = self.rng.integers(0, vocab_size, size=n_ctx, dtype=np.int64)
             return {"input_ids": torch.tensor(tokens, dtype=torch.long)}
 
-    # Use a large enough length for the dataset (arbitrary, e.g. 100_000)
-    random_dataset = RandomTokenDataset(length=100_000, seed=global_seed)
+    # Use a large enough length for the dataset (arbitrary, e.g. 1e14)
+    random_dataset = RandomTokenDataset(length=int(1e14), seed=global_seed)
     loader = DataLoader(
         random_dataset,
         batch_size=batch_size,
@@ -412,11 +412,24 @@ def optimize_lm(
         # for ma in masks["transformer.wte"][0, :100]:
         #     l = ma[ma > 0.1].tolist()
         #     print(l)
+
         # --- Calculate Losses --- #
         total_loss = torch.tensor(0.0, device=device)
         loss_terms = {}
 
         ####### param match loss #######
+        ################ Use the mask but set them all to 1
+        # masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
+        # assert len(components) == 1, "Only one embedding component is supported"
+        # component = list(components.values())[0]
+        # assert isinstance(component, EmbeddingComponent)
+        # param_match_loss_val = calc_embedding_recon_loss_lm(
+        #     model=model,
+        #     batch=batch,
+        #     component=component,
+        #     masks=masks_all_ones,
+        #     unembed=config.is_embed_unembed_recon,
+        # )
         param_match_loss_val = calc_param_match_loss_lm(
             components=components,
             target_model=model.model,

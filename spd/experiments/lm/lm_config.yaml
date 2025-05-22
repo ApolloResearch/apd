@@ -7,7 +7,7 @@ wandb_run_name_prefix: "" # Prefix for generated run name
 # --- General ---
 seed: 0
 unit_norm_matrices: false # Whether to enforce unit norm on A matrices (not typically used here)
-m: 3000 # Rank of the decomposition / number of components per layer
+m: 1000
 
 # --- Loss Coefficients ---
 # Set coeffs to null if the loss shouldn't be computed
@@ -29,8 +29,8 @@ n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
 n_gate_hidden_neurons: null
 
 # --- Training ---
-batch_size: 4 # Adjust based on GPU memory
-steps: 20_000 # Total training steps
+batch_size: 8 # Adjust based on GPU memory
+steps: 200_000 # Total training steps
 lr: 1e-4 # Learning rate
 lr_schedule: cosine # LR schedule type (constant, linear, cosine, exponential)
 lr_warmup_pct: 0.01 # Percentage of steps for linear LR warmup
@@ -38,7 +38,7 @@ lr_exponential_halflife: null # Required if lr_schedule is exponential
 init_from_target_model: false # Not implemented/applicable for this setup
 
 # --- Logging & Saving ---
-image_freq: 2000 # Frequency for generating/logging plots
+image_freq: 10000 # Frequency for generating/logging plots
 print_freq: 1000 # Frequency for printing logs to console
 save_freq: null # Frequency for saving checkpoints
 image_on_first_step: true # Whether to log plots at step 0

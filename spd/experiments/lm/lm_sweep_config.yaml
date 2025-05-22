@@ -15,7 +15,18 @@ parameters:
   embedding_recon_coeff:
     values: [1, 1e-1, 1e-2]
   lp_sparsity_coeff:
-    values: [1, 3e-1, 1e-1, 3e-2, 1e-2]
+    values: [1e-3, 3e-4, 1e-4]
+  m:
+    values: [6_000, 12_000]
+  steps:
+    values: [150_000]
+  # layerwise_random_recon_coeff:
+  #   values: [1e-1]
+  embedding_recon_coeff:
+    values: [1e-2, 3e-3, 1e-3]
+  lp_sparsity_coeff:
+    # values: [1, 3e-1, 1e-1, 3e-2, 1e-2]
+    values: [3e-2, 1e-2, 3e-3, 1e-3]
 
 
 command:
