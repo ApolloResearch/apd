@@ -8,9 +8,8 @@ import einops
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import wandb
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -220,7 +219,10 @@ def calc_random_masks_mse_loss(
 
 def calc_component_acts(
     pre_weight_acts: dict[
-        str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
+        str,
+        Float[Tensor, "batch n_instances d_in"]
+        | Float[Tensor, "batch d_in"]
+        | Int[Tensor, "batch pos"],
     ],
     As: dict[str, Float[Tensor, "d_in m"] | Float[Tensor, "n_instances d_in m"]],
 ) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
@@ -233,17 +235,15 @@ def calc_component_acts(
     component_acts = {}
     for param_name in pre_weight_acts:
         raw_name = param_name.removesuffix(".hook_pre")
-        if not pre_weight_acts[param_name].dtype.is_floating_point:
-            # Must be token indices before an embedding layer
-            acts = F.one_hot(pre_weight_acts[param_name], num_classes=As[raw_name].shape[0]).to(
-                dtype=As[raw_name].dtype
-            )
+        acts = pre_weight_acts[param_name]
+        if not acts.dtype.is_floating_point:
+            # Embedding layer
+            component_acts[raw_name] = As[raw_name][acts]
         else:
             # Linear layer
-            acts = pre_weight_acts[param_name]
-        component_acts[raw_name] = einops.einsum(
-            acts, As[raw_name], "... d_in, ... d_in m -> ... m"
-        )
+            component_acts[raw_name] = einops.einsum(
+                acts, As[raw_name], "... d_in, ... d_in m -> ... m"
+            )
     return component_acts
 
 
@@ -261,19 +261,15 @@ def calc_masked_target_component_acts(
         masked_As = einops.einsum(
             As[raw_name], masks[raw_name], "... d_in m, batch ... m -> batch ... d_in m"
         )
-        if pre_weight_acts[param_name].ndim == 2:
-            # Must be an embedding. TODO: Handle this much more cleanly in future
-            acts = F.one_hot(pre_weight_acts[param_name], num_classes=As[raw_name].shape[0]).to(
-                dtype=As[raw_name].dtype
-            )
+        acts = pre_weight_acts[param_name]
+        if not acts.dtype.is_floating_point:
+            masked_target_component_acts[raw_name] = masked_As[acts]
         else:
-            # Linear layer
-            acts = pre_weight_acts[param_name]
-        masked_target_component_acts[raw_name] = einops.einsum(
-            acts,
-            masked_As,
-            "batch ... d_in, batch ... d_in m -> batch ... m",
-        )
+            masked_target_component_acts[raw_name] = einops.einsum(
+                acts,
+                masked_As,
+                "batch ... d_in, batch ... d_in m -> batch ... m",
+            )
     return masked_target_component_acts
 
 
