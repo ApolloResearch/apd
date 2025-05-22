@@ -216,7 +216,7 @@ def calc_embedding_recon_loss_lm(
     model: SSModel,
     batch: Float[Tensor, "batch pos"],
     component: EmbeddingComponent,
-    masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
+    masks: list[dict[str, Float[Tensor, "batch pos m"]]],
     unembed: bool = False,
 ) -> Float[Tensor, ""]:
     """
@@ -239,17 +239,21 @@ def calc_embedding_recon_loss_lm(
     target_out: Float[Tensor, "batch pos d_emb"] = orig_module(batch)
 
     # --- APD-augmented embedding output ---------------------------------------------------- #
-    if masks is not None:
-        component.mask = masks[module_name]
-    apd_out: Float[Tensor, "batch pos d_emb"] = component(batch)  # type: ignore[arg-type]
-    component.mask = None
+    loss = torch.tensor(0.0, device=component.A.device)
+    for mask_info in masks:
+        component.mask = mask_info[module_name]
 
-    if unembed:
-        target_out_unembed = model.model.lm_head(target_out)
-        apd_out_unembed = model.model.lm_head(apd_out)
-        loss = calc_kl_divergence_lm(pred=apd_out_unembed, target=target_out_unembed)
-    else:
-        loss = ((apd_out - target_out) ** 2).sum(dim=-1).mean()
+        apd_out: Float[Tensor, "batch pos d_emb"] = component(batch)  # type: ignore[arg-type]
+        component.mask = None
+
+        if unembed:
+            target_out_unembed = model.model.lm_head(target_out)
+            apd_out_unembed = model.model.lm_head(apd_out)
+            loss += calc_kl_divergence_lm(pred=apd_out_unembed, target=target_out_unembed)
+        else:
+            loss += ((apd_out - target_out) ** 2).sum(dim=-1).mean()
+
+    loss /= len(masks)
 
     return loss
 
@@ -280,7 +284,7 @@ def create_embed_mask_sample_table(
         formatted_values = [f"{val:.2f}" for val in active_values]
         # Pad with empty strings if fewer than 10 components
         while len(formatted_values) < 10:
-            formatted_values.append("")
+            formatted_values.append("0")
         # Add row name as the first element
         table_data.append([f"{i}"] + formatted_values)
 
@@ -380,6 +384,18 @@ def optimize_lm(
         loss_terms = {}
 
         ####### param match loss #######
+        ################ Use the mask but set them all to 1
+        # masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
+        # assert len(components) == 1, "Only one embedding component is supported"
+        # component = list(components.values())[0]
+        # assert isinstance(component, EmbeddingComponent)
+        # param_match_loss_val = calc_embedding_recon_loss_lm(
+        #     model=model,
+        #     batch=batch,
+        #     component=component,
+        #     masks=[masks_all_ones],
+        #     unembed=config.is_embed_unembed_recon,
+        # )
         param_match_loss_val = calc_param_match_loss_lm(
             components=components,
             target_model=model.model,
@@ -439,7 +455,7 @@ def optimize_lm(
                 model=model,
                 batch=batch,
                 component=component,
-                masks=random_masks[0],
+                masks=random_masks,
                 unembed=config.is_embed_unembed_recon,
             )
             total_loss += config.embedding_recon_coeff * embedding_recon_loss
