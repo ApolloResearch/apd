@@ -320,6 +320,39 @@ def create_random_token_loader(
     return loader, tokenizer
 
 
+def create_embed_mask_sample_table(
+    masks: dict[str, Float[Tensor, "batch pos m"]],
+) -> wandb.Table | None:
+    """Create a wandb table visualizing embedding mask values.
+
+    Args:
+        masks: Dictionary of masks for each component.
+
+    Returns:
+        A wandb Table object or None if transformer.wte not in masks.
+    """
+    if "transformer.wte" not in masks:
+        return None
+
+    # Create a 20x10 table for wandb
+    table_data = []
+    # Add "Row Name" as the first column
+    component_names = ["TokenSample"] + ["CompVal" for _ in range(10)]
+
+    for i, ma in enumerate(masks["transformer.wte"][0, :20]):
+        active_values = ma[ma > 0.1].tolist()
+        # Cap at 10 components
+        active_values = active_values[:10]
+        formatted_values = [f"{val:.2f}" for val in active_values]
+        # Pad with empty strings if fewer than 10 components
+        while len(formatted_values) < 10:
+            formatted_values.append("")
+        # Add row name as the first element
+        table_data.append([f"{i}"] + formatted_values)
+
+    return wandb.Table(data=table_data, columns=component_names)
+
+
 def optimize_lm(
     model: SSModel,
     config: Config,
@@ -565,6 +598,10 @@ def optimize_lm(
                 zero_masked_ce_loss = F.cross_entropy(
                     input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
                 )
+
+                embed_mask_table = create_embed_mask_sample_table(masks)
+                if embed_mask_table is not None:
+                    log_data["misc/embed_mask_sample"] = embed_mask_table
 
                 log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
                 log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
