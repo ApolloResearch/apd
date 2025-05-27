@@ -702,16 +702,18 @@ def main(
     model_path = f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}"
     model = Llama.from_pretrained(model_path, model_config)
 
-    n_unique_tokens = 4000
+    n_unique_tokens = 100
     from spd.utils import replace_pydantic_model
 
     model_config = replace_pydantic_model(model_config, {"vocab_size": n_unique_tokens})
-    # Change the weights of the embedding matrix to be of shape (n_unique_tokens, emb_dim) with
-    # random values
+    # # Change the weights of the embedding matrix to be of shape (n_unique_tokens, emb_dim) with
+    # # random values
+    emb_cache = model.transformer.wte.weight.data.clone()
     model.transformer.wte = nn.Embedding(
         num_embeddings=model_config.vocab_size,
         embedding_dim=model_config.n_embd,
     )
+    model.transformer.wte.weight.data = emb_cache[:n_unique_tokens]
 
     ss_model = SSModel(
         llama_model=model,

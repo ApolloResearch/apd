@@ -18,6 +18,33 @@ model_path = f"chandan-sreedhara/SimpleStories-{model_size}"
 model = Llama.from_pretrained(model_path, model_config)
 # model.to("cuda")
 model.eval()
+
+# %%
+# Load a pythia model instead
+from transformers import AutoModelForCausalLM
+
+pythia_model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-70m")
+pythia_model.eval()
+# %%
+from transformers import AutoModelForCausalLM
+
+# Now load the tinystories model
+model = AutoModelForCausalLM.from_pretrained("roneneldan/TinyStories-1M")
+model.eval()
+
+# %%
+# Get the maximum cosine similarity for each row of the embedding matrix
+emb = model.transformer.wte.weight.clone().to("cuda")
+# emb = pythia_model.gpt_neox.embed_in.weight.clone().to("cuda")
+normed_emb = emb / emb.norm(dim=-1, keepdim=True)
+x = normed_emb @ normed_emb.T
+# Remove the diagonal
+x[torch.arange(x.shape[0]), torch.arange(x.shape[0])] = 0
+max_cosine_sims = x.max(dim=-1).values
+print("Shape of max cosine sims", max_cosine_sims.shape)
+print(max_cosine_sims[:50])
+print("Max cosine sim", max_cosine_sims.max())
+print("Mean cosine sim", max_cosine_sims.mean())
 # %%
 
 ss_model = SSModel(
