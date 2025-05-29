@@ -6,31 +6,37 @@ unit_norm_matrices: false
 seed: 0
 m: 100
 param_match_coeff: 1.0
-masked_recon_coeff: 1.0
+# masked_recon_coeff: 1.0
 # act_recon_coeff: 1
-random_mask_recon_coeff: 1.0
+# random_mask_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: null
 # n_gate_hidden_neurons: 8
-layerwise_recon_coeff: 1.0
+# layerwise_recon_coeff: 1.0
 layerwise_random_recon_coeff: 1.0
-pnorm: 0.9
-lp_sparsity_coeff: 3e-2
+pnorm: 2
+lp_sparsity_coeff: 1e-2
 batch_size: 256
 steps: 20_000
 image_freq: 5_000
 print_freq: 100
-save_freq: 10_000
+save_freq: null
 lr: 1e-3
 lr_schedule: cosine
 lr_warmup_pct: 0.01
 image_on_first_step: true
 init_from_target_model: false
+
+n_eval_steps: 100
+
 task_config:
   task_name: residual_mlp
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: wandb:spd-train-resid-mlp/runs/zas5yjdl # 1 layer
+  target_module_patterns:
+    - "layers.*.mlp_in"
+    - "layers.*.mlp_out"
+  pretrained_model_path: wandb:spd-train-resid-mlp/runs/44nbrrue # 1 layer
 
 
 ########## 2 layer ##########

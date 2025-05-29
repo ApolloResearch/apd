@@ -34,6 +34,9 @@ class ResidualMLPTaskConfig(BaseModel):
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"
     pretrained_model_path: ModelPath  # e.g. wandb:spd-resid-mlp/runs/j9kmavzi
+    # TODO: Move to main config when supported by TMS
+    # List of fnmatch patterns for nn.Linear modules to decompose
+    target_module_patterns: list[str] = ["mlp.mlp_in", "mlp.mlp_out"]
 
 
 class LMTaskConfig(BaseModel):
@@ -45,7 +48,7 @@ class LMTaskConfig(BaseModel):
     column_name: str = "story"
     train_data_split: str = "train"
     eval_data_split: str = "test"
-    n_eval_steps: PositiveInt = 100
+    # TODO: Move to main config when supported by TMS
     # List of fnmatch patterns for nn.Linear modules to decompose
     target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
 
@@ -86,12 +89,14 @@ class Config(BaseModel):
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
+    n_eval_steps: PositiveInt | None = None  # TODO: Remove the None when TMS supports this
 
     # --- Logging & Saving ---
     image_freq: PositiveInt | None = None
     image_on_first_step: bool = True
     print_freq: PositiveInt
     save_freq: PositiveInt | None = None
+    log_ce_losses: bool = False
 
     # --- Pretrained model info ---
     pretrained_model_class: str | None = None  # e.g. "transformers.LlamaForCausalLM"

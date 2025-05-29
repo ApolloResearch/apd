@@ -36,12 +36,14 @@ lr: 1e-4 # Learning rate
 lr_schedule: constant # LR schedule type (constant, linear, cosine, exponential)
 lr_warmup_pct: 0.01 # Percentage of steps for linear LR warmup
 lr_exponential_halflife: null # Required if lr_schedule is exponential
+n_eval_steps: 100 # Number of evaluation steps
 
 # --- Logging & Saving ---
 image_freq: 2000 # Frequency for generating/logging plots
 image_on_first_step: true # Whether to log plots at step 0
 print_freq: 1000 # Frequency for printing logs to console
 save_freq: null # Frequency for saving checkpoints
+log_ce_losses: true
 
 # --- Pretrained model info ---
 pretrained_model_class: transformers.AutoModelForCausalLM
@@ -58,7 +60,6 @@ task_config:
   column_name: "text" # Column name in dataset to use for LM task
   train_data_split: "train" # Dataset split to use
   eval_data_split: "validation" # Dataset split to use
-  n_eval_steps: 100 # Number of evaluation steps
   # List of fnmatch patterns for nn.Linear modules to decompose
   # target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
   # target_module_patterns: ["model.embed_tokens"]

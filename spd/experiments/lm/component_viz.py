@@ -17,6 +17,7 @@ from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
+from spd.utils import extract_batch_data
 
 
 def component_activation_statistics(
@@ -43,7 +44,7 @@ def component_activation_statistics(
     data_iter = iter(dataloader)
     for _ in range(n_steps):
         # --- Get Batch --- #
-        batch = next(data_iter)["input_ids"].to(device)
+        batch = extract_batch_data(next(data_iter))
 
         _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
@@ -59,12 +60,15 @@ def component_activation_statistics(
             detach_inputs=False,
         )
         for module_name, mask in masks.items():
-            assert mask.ndim == 3  # (batch_size, pos, m)
-            n_tokens[module_name] += mask.shape[0] * mask.shape[1]
+            # mask (batch, pos, m) or (batch, m)
+            n_tokens[module_name] += mask.shape[:-1].numel()
+
             # Count the number of components that are active at all
             active_components = mask > 0
             total_n_active_components[module_name] += int(active_components.sum().item())
-            component_activation_counts[module_name] += active_components.sum(dim=(0, 1))
+
+            sum_dims = tuple(range(mask.ndim - 1))
+            component_activation_counts[module_name] += active_components.sum(dim=sum_dims)
 
     # Show the mean number of components
     mean_n_active_components_per_token: dict[str, float] = {

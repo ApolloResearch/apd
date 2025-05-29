@@ -35,6 +35,7 @@ from spd.run_spd import (
     get_common_run_name_suffix,
 )
 from spd.utils import (
+    extract_batch_data,
     get_device,
     get_lr_schedule_fn,
     get_lr_with_warmup,
@@ -294,15 +295,30 @@ def create_embed_mask_sample_table(
 
 
 def optimize_lm(
-    model: ComponentModel,
+    target_model: nn.Module,
     config: Config,
     device: str,
-    train_loader: DataLoader[Int[Tensor, "..."]],
-    eval_loader: DataLoader[Int[Tensor, "..."]],
+    train_loader: DataLoader[Int[Tensor, "..."]]
+    | DataLoader[Float[Tensor, "..."], Float[Tensor, "..."]],
+    eval_loader: DataLoader[Int[Tensor, "..."]]
+    | DataLoader[Float[Tensor, "..."], Float[Tensor, "..."]],
     n_eval_steps: int,
     out_dir: Path | None,
 ) -> None:
     """Run the optimization loop for LM decomposition."""
+
+    model = ComponentModel(
+        base_model=target_model,
+        target_module_patterns=config.task_config.target_module_patterns,
+        m=config.m,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
+        pretrained_model_output_attr=config.pretrained_model_output_attr,
+    )
+    model.to(device)
+    logger.info("Model loaded.")
+    logger.info("Freezing target model parameters...")
+    for param in target_model.parameters():
+        param.requires_grad = False
 
     # We used "-" instead of "." as module names can't have "." in them
     gates: dict[str, Gate | GateMLP] = {
@@ -355,13 +371,15 @@ def optimize_lm(
         # --- Zero Gradients --- #
         optimizer.zero_grad()
 
-        # --- Get Batch --- #
         try:
-            batch = next(data_iter)["input_ids"].to(device)
+            batch_item = next(data_iter)
+            batch = extract_batch_data(batch_item)
         except StopIteration:
             logger.warning("Dataloader exhausted, resetting iterator.")
             data_iter = iter(train_loader)
-            batch = next(data_iter)["input_ids"].to(device)
+            batch_item = next(data_iter)
+            batch = extract_batch_data(batch_item)
+        batch = batch.to(device)
 
         target_out, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
@@ -501,37 +519,38 @@ def optimize_lm(
                     pred=masked_component_logits, target=target_logits
                 )
 
-                ###### CE vs true labels #######
-                flat_all_component_logits = einops.rearrange(
-                    unmasked_component_logits, "... vocab -> (...) vocab"
-                )
-                flat_masked_component_logits = einops.rearrange(
-                    masked_component_logits, "... vocab -> (...) vocab"
-                )
-                flat_batch = batch.flatten()
-                unmasked_ce_loss = F.cross_entropy(
-                    input=flat_all_component_logits[:-1], target=flat_batch[1:]
-                )
-                masked_ce_loss = F.cross_entropy(
-                    input=flat_masked_component_logits[:-1], target=flat_batch[1:]
-                )
+                if config.log_ce_losses:
+                    ###### CE vs true labels #######
+                    flat_all_component_logits = einops.rearrange(
+                        unmasked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    flat_masked_component_logits = einops.rearrange(
+                        masked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    flat_batch = batch.flatten()
+                    unmasked_ce_loss = F.cross_entropy(
+                        input=flat_all_component_logits[:-1], target=flat_batch[1:]
+                    )
+                    masked_ce_loss = F.cross_entropy(
+                        input=flat_masked_component_logits[:-1], target=flat_batch[1:]
+                    )
 
-                flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
-                target_ce_loss = F.cross_entropy(
-                    input=flat_target_logits[:-1], target=flat_batch[1:]
-                )
+                    flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
+                    target_ce_loss = F.cross_entropy(
+                        input=flat_target_logits[:-1], target=flat_batch[1:]
+                    )
 
-                # --- CE when every component is fully masked (all-zero masks) --- #
-                zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
-                zero_masked_component_logits = model.forward_with_components(
-                    batch, components=components, masks=zero_masks
-                )
-                flat_zero_masked_component_logits = einops.rearrange(
-                    zero_masked_component_logits, "... vocab -> (...) vocab"
-                )
-                zero_masked_ce_loss = F.cross_entropy(
-                    input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
-                )
+                    # --- CE when every component is fully masked (all-zero masks) --- #
+                    zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+                    zero_masked_component_logits = model.forward_with_components(
+                        batch, components=components, masks=zero_masks
+                    )
+                    flat_zero_masked_component_logits = einops.rearrange(
+                        zero_masked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    zero_masked_ce_loss = F.cross_entropy(
+                        input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+                    )
 
                 embed_mask_table = create_embed_mask_sample_table(masks)
                 if embed_mask_table is not None:
@@ -539,10 +558,11 @@ def optimize_lm(
 
                 log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
                 log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
-                log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
-                log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
-                log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
-                log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+                if config.log_ce_losses:
+                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
 
                 if config.wandb_project:
                     mask_l_zero = calc_mask_l_zero(masks=masks)
@@ -632,19 +652,9 @@ def main(
     assert config.pretrained_model_name is not None and config.pretrained_model_class is not None, (
         "Temporarily assume we have pretrained model name and class"
     )
-    base_model = load_pretrained(
+    target_model = load_pretrained(
         path_to_class=config.pretrained_model_class, model_name_or_path=config.pretrained_model_name
     )
-
-    comp_model = ComponentModel(
-        base_model=base_model,
-        target_module_patterns=config.task_config.target_module_patterns,
-        m=config.m,
-        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
-        pretrained_model_output_attr=config.pretrained_model_output_attr,
-    )
-    comp_model.to(device)
-    logger.info("Model loaded.")
 
     # --- Setup Run Name and Output Dir --- #
     run_name = get_run_name(
@@ -707,19 +717,18 @@ def main(
 
     logger.info("Dataset and tokenizer loaded.")
 
-    logger.info("Freezing target model parameters...")
-    for param in comp_model.model.parameters():
-        param.requires_grad = False
     logger.info("Target model frozen.")
 
+    # TODO: Below not needed when TMS supports config.n_eval_steps
+    assert config.n_eval_steps is not None, "n_eval_steps must be set"
     logger.info("Starting optimization...")
     optimize_lm(
-        model=comp_model,
+        target_model=target_model,
         config=config,
         device=device,
         train_loader=train_loader,
         eval_loader=eval_loader,
-        n_eval_steps=config.task_config.n_eval_steps,
+        n_eval_steps=config.n_eval_steps,
         out_dir=out_dir,
     )
 

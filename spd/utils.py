@@ -343,24 +343,34 @@ class SparseFeatureDataset(
 
 def compute_feature_importances(
     batch_size: int,
-    n_instances: int,
+    n_instances: int | None,
     n_features: int,
     importance_val: float | None,
     device: str,
 ) -> Float[Tensor, "batch_size n_instances n_features"]:
     # Defines a tensor where the i^th feature has importance importance^i
     if importance_val is None or importance_val == 1.0:
-        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
+        shape = (
+            (batch_size, n_instances, n_features)
+            if n_instances is not None
+            else (batch_size, n_features)
+        )
+        importance_tensor = torch.ones(shape, device=device)
     else:
         powers = torch.arange(n_features, device=device)
         importances = torch.pow(importance_val, powers)
-        # Now make it a tensor of shape (batch_size, n_instances, n_features)
-        importance_tensor = einops.repeat(
-            importances,
-            "n_features -> batch_size n_instances n_features",
-            batch_size=batch_size,
-            n_instances=n_instances,
-        )
+        if n_instances is not None:
+            # Now make it a tensor of shape (batch_size, n_instances, n_features)
+            importance_tensor = einops.repeat(
+                importances,
+                "n_features -> batch_size n_instances n_features",
+                batch_size=batch_size,
+                n_instances=n_instances,
+            )
+        else:
+            importance_tensor = einops.repeat(
+                importances, "n_features -> batch_size n_features", batch_size=batch_size
+            )
     return importance_tensor
 
 
@@ -455,3 +465,41 @@ def load_pretrained(path_to_class: str, model_name_or_path: Path | str, **kwargs
     if not hasattr(model_cls, "from_pretrained"):
         raise TypeError(f"{model_cls} lacks a `from_pretrained` method.")
     return model_cls.from_pretrained(model_name_or_path, **kwargs)  # type: ignore
+
+
+def extract_batch_data(
+    batch_item: dict[str, Any] | tuple[torch.Tensor, ...] | torch.Tensor,
+    input_key: str = "input_ids",
+) -> torch.Tensor:
+    """Extract input data from various batch formats.
+
+    This utility function handles different batch formats commonly used across the codebase:
+    1. Dictionary format: {"input_ids": tensor, ...} - common in LM tasks
+    2. Tuple format: (input_tensor, labels) - common in SPD optimization
+    3. Direct tensor: when batch is already the input tensor
+
+    Args:
+        batch_item: The batch item from a data loader
+        input_key: Key to use for dictionary format (default: "input_ids")
+
+    Returns:
+        The input tensor extracted from the batch
+    """
+    if isinstance(batch_item, dict):
+        # Dictionary format: extract the specified key
+        if input_key not in batch_item:
+            available_keys = list(batch_item.keys())
+            raise KeyError(
+                f"Key '{input_key}' not found in batch. Available keys: {available_keys}"
+            )
+        tensor = batch_item[input_key]
+    elif isinstance(batch_item, tuple):
+        # Assume input is the first element
+        tensor = batch_item[0]
+    elif isinstance(batch_item, torch.Tensor):
+        # Direct tensor format
+        tensor = batch_item
+    else:
+        raise TypeError(f"Unsupported batch format: {type(batch_item)}. ")
+
+    return tensor
