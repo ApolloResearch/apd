@@ -39,10 +39,10 @@ class ResidualMLPTaskConfig(BaseModel):
 class LMTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["lm"] = "lm"
-    model_size: str  # e.g. "1.25M"
     max_seq_len: PositiveInt = 512
     buffer_size: PositiveInt = 1000
     dataset_name: str = "lennart-finke/SimpleStories"
+    column_name: str = "story"
     train_data_split: str = "train"
     eval_data_split: str = "test"
     n_eval_steps: PositiveInt = 100
@@ -52,17 +52,20 @@ class LMTaskConfig(BaseModel):
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    # --- WandB
     wandb_project: str | None = None
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
+
+    # --- General ---
     seed: int = 0
-    batch_size: PositiveInt
-    steps: PositiveInt
-    print_freq: PositiveInt
-    image_freq: PositiveInt | None = None
-    image_on_first_step: bool = True
-    save_freq: PositiveInt | None = None
-    lr: PositiveFloat
+    unit_norm_matrices: bool = False
+    m: PositiveInt
+    n_random_masks: PositiveInt
+    n_gate_hidden_neurons: PositiveInt | None = None
+    init_from_target_model: bool = False
+
+    # --- Loss Coefficients
     out_recon_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
@@ -72,22 +75,34 @@ class Config(BaseModel):
     layerwise_random_recon_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat
     schatten_coeff: NonNegativeFloat | None = None
+    embedding_recon_coeff: float | None = None
+    is_embed_unembed_recon: bool = False
     pnorm: PositiveFloat
-    m: PositiveInt
-    n_random_masks: PositiveInt
-    init_from_target_model: bool = False
+
+    # --- Training ---
+    lr: PositiveFloat
+    steps: PositiveInt
+    batch_size: PositiveInt
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
-    sparsity_loss_type: Literal["jacobian"] = "jacobian"
-    unit_norm_matrices: bool = False
-    attribution_type: Literal["gradient"] = "gradient"
-    n_gate_hidden_neurons: PositiveInt | None = None
+
+    # --- Logging & Saving ---
+    image_freq: PositiveInt | None = None
+    image_on_first_step: bool = True
+    print_freq: PositiveInt
+    save_freq: PositiveInt | None = None
+
+    # --- Pretrained model info ---
+    pretrained_model_class: str | None = None  # e.g. "transformers.LlamaForCausalLM"
+    pretrained_model_name: str | None = None  # e.g. "SimpleStories/SimpleStories-1.25M"
+    pretrained_model_output_attr: str | None = None  # e.g. "logits"
+    tokenizer_name: str | None = None  # e.g. "EleutherAI/gpt-neo-125M"
+
+    # --- Task Specific ---
     task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig = Field(
         ..., discriminator="task_name"
     )
-    embedding_recon_coeff: float | None = None
-    is_embed_unembed_recon: bool = False
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
     RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {}

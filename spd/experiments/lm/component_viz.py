@@ -7,12 +7,12 @@ import math
 import torch
 from jaxtyping import Float
 from matplotlib import pyplot as plt
-from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from spd.configs import LMTaskConfig
-from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
+from spd.data import DatasetConfig, create_data_loader
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
@@ -20,7 +20,7 @@ from spd.types import ModelPath
 
 
 def component_activation_statistics(
-    model: SSModel,
+    model: ComponentModel,
     dataloader: DataLoader[Float[Tensor, "batch pos"]],
     n_steps: int,
     device: str,
@@ -115,7 +115,7 @@ def plot_mean_component_activation_counts(
 
 def main(path: ModelPath) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    ss_model, config, checkpoint_path = SSModel.from_pretrained(path)
+    ss_model, config, checkpoint_path = ComponentModel.from_pretrained(path)
     ss_model.to(device)
 
     out_dir = checkpoint_path
@@ -123,13 +123,12 @@ def main(path: ModelPath) -> None:
     assert isinstance(config.task_config, LMTaskConfig)
     dataset_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        tokenizer_file_path=None,
-        hf_tokenizer_path=f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}",
+        hf_tokenizer_path=config.pretrained_model_name,
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
         streaming=False,
-        column_name="story",
+        column_name=config.task_config.column_name,
     )
 
     dataloader, tokenizer = create_data_loader(

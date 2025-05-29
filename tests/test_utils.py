@@ -5,7 +5,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.utils import SparseFeatureDataset, compute_feature_importances
+from spd.utils import SparseFeatureDataset, compute_feature_importances, resolve_class
 
 
 def test_dataset_at_least_zero_active():
@@ -34,9 +34,9 @@ def test_dataset_at_least_zero_active():
 
     # Check that the proportion of non-zero elements is close to feature_probability
     non_zero_proportion = torch.count_nonzero(batch) / batch.numel()
-    assert (
-        abs(non_zero_proportion - feature_probability) < 0.05
-    ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
+    assert abs(non_zero_proportion - feature_probability) < 0.05, (
+        f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
+    )
 
 
 def test_generate_multi_feature_batch_no_zero_samples():
@@ -116,9 +116,9 @@ def test_dataset_exactly_n_active(n: int):
 
     # Check that the non-zero values are in the value_range
     non_zero_values = batch[batch != 0]
-    assert torch.all(
-        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
-    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+    assert torch.all((non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])), (
+        f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -190,3 +190,12 @@ def test_sync_inputs_overlapping():
     # Should raise an assertion error with the word "overlapping"
     with pytest.raises(AssertionError, match="overlapping"):
         dataset.generate_batch(5)
+
+
+def test_resolve_class():
+    assert resolve_class("torch.nn.Linear") == torch.nn.Linear
+    from transformers import LlamaForCausalLM
+
+    assert resolve_class("transformers.LlamaForCausalLM") == LlamaForCausalLM
+    with pytest.raises(ImportError):
+        resolve_class("fakepackage.fakemodule.FakeClass")

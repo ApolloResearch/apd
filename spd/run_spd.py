@@ -36,7 +36,6 @@ def get_common_run_name_suffix(config: Config) -> str:
     run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
     run_suffix += f"m{config.m}_"
     run_suffix += f"sd{config.seed}_"
-    run_suffix += f"attr-{config.attribution_type[:3]}_"
     run_suffix += f"lr{config.lr:.2e}_"
     run_suffix += f"bs{config.batch_size}_"
     return run_suffix

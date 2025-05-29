@@ -54,7 +54,6 @@ def test_resid_mlp_decomposition_happy_path() -> None:
         act_recon_coeff=1,
         lp_sparsity_coeff=1.0,
         pnorm=0.9,
-        attribution_type="gradient",
         lr=1e-3,
         batch_size=32,
         steps=50,  # Run only a few steps for the test
@@ -134,9 +133,9 @@ def test_resid_mlp_decomposition_happy_path() -> None:
 
     print(f"Final loss: {final_loss}, initial loss: {initial_loss}")
     # Assert that the final loss is lower than the initial loss
-    assert (
-        final_loss < initial_loss + 1e-3
-    ), f"Expected final loss to be lower than initial loss, but got {final_loss} >= {initial_loss}"
+    assert final_loss < initial_loss + 1e-3, (
+        f"Expected final loss to be lower than initial loss, but got {final_loss} >= {initial_loss}"
+    )
 
     # Show that W_E is still the same as the target model's W_E
     assert torch.allclose(model.W_E, target_model.W_E, atol=1e-6)
@@ -272,6 +271,6 @@ def test_init_resid_mlp_spd_model_from_target() -> None:
         # Check mlp_out weights
         spd_weight = spd_model.layers[i].mlp_out.weight
         target_weight = target_model.layers[i].mlp_out.weight
-        assert torch.allclose(
-            spd_weight, target_weight
-        ), f"mlp_out weights don't match at layer {i}"
+        assert torch.allclose(spd_weight, target_weight), (
+            f"mlp_out weights don't match at layer {i}"
+        )
