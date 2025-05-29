@@ -12,20 +12,18 @@ import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 import yaml
-from jaxtyping import Bool, Float
-from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
-from simple_stories_train.models.llama import Llama
-from simple_stories_train.models.model_configs import MODEL_CONFIGS
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.configs import Config, LMTaskConfig
+from spd.data import DatasetConfig, create_data_loader
 from spd.experiments.lm.component_viz import (
     component_activation_statistics,
     plot_mean_component_activation_counts,
 )
-from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import (
@@ -41,6 +39,7 @@ from spd.utils import (
     get_lr_schedule_fn,
     get_lr_with_warmup,
     load_config,
+    load_pretrained,
     set_seed,
 )
 from spd.wandb_utils import init_wandb
@@ -50,7 +49,7 @@ wandb.require("core")
 
 def get_run_name(
     config: Config,
-    model_size: str,
+    pretrained_model_name: str | None,
     max_seq_len: int,
 ) -> str:
     """Generate a run name based on the config."""
@@ -59,7 +58,9 @@ def get_run_name(
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"_lm{model_size}_seq{max_seq_len}"
+        if pretrained_model_name:
+            run_suffix += f"_pretrained{pretrained_model_name}"
+        run_suffix += f"_seq{max_seq_len}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -76,8 +77,8 @@ def plot_lm_results(
 
 
 def calc_recon_mse_lm(
-    out1: Float[Tensor, "batch pos vocab"],
-    out2: Float[Tensor, "batch pos vocab"],
+    out1: Float[Tensor, "... vocab"],
+    out2: Float[Tensor, "... vocab"],
 ) -> Float[Tensor, ""]:
     """Calculate the Mean Squared Error reconstruction loss for LM logits."""
     assert out1.shape == out2.shape
@@ -86,8 +87,8 @@ def calc_recon_mse_lm(
 
 
 def calc_kl_divergence_lm(
-    pred: Float[Tensor, "batch pos vocab"],
-    target: Float[Tensor, "batch pos vocab"],
+    pred: Float[Tensor, "... vocab"],
+    target: Float[Tensor, "... vocab"],
 ) -> Float[Tensor, ""]:
     """Calculate the KL divergence between two logits."""
     assert pred.shape == target.shape
@@ -99,7 +100,7 @@ def calc_kl_divergence_lm(
 
 def calc_param_match_loss_lm(
     components: dict[str, LinearComponentWithBias | EmbeddingComponent],
-    target_model: Llama,
+    target_model: nn.Module,
     n_params: int,
     device: str,
 ) -> Float[Tensor, ""]:
@@ -128,19 +129,19 @@ def calc_param_match_loss_lm(
 
 
 def calc_layerwise_recon_loss_lm(
-    model: SSModel,
-    batch: Float[Tensor, "batch pos"],
+    model: ComponentModel,
+    batch: Int[Tensor, "..."],
     device: str,
     components: dict[str, LinearComponentWithBias | EmbeddingComponent],
-    masks: list[dict[str, Float[Tensor, "batch pos m"]]],
-    target_out: Float[Tensor, "batch pos vocab"],
+    masks: list[dict[str, Float[Tensor, "... m"]]],
+    target_out: Float[Tensor, "... d_model_out"],
 ) -> Float[Tensor, ""]:
     """Calculate the recon loss when augmenting the model one (masked) component at a time."""
     total_loss = torch.tensor(0.0, device=device)
     for mask_info in masks:
         for component_name, component in components.items():
             module_name = component_name.replace("-", ".")
-            modified_out, _ = model.forward_with_component(
+            modified_out = model.forward_with_component(
                 batch,
                 module_name=module_name,
                 component=component,
@@ -153,7 +154,7 @@ def calc_layerwise_recon_loss_lm(
 
 
 def calc_lp_sparsity_loss_lm(
-    relud_masks: dict[str, Float[Tensor, "batch pos m"]], pnorm: float
+    relud_masks: dict[str, Float[Tensor, "... m"]], pnorm: float
 ) -> Float[Tensor, ""]:
     """Calculate the Lp sparsity loss on the attributions.
 
@@ -169,12 +170,12 @@ def calc_lp_sparsity_loss_lm(
     for layer_relud_mask in relud_masks.values():
         total_loss = total_loss + layer_relud_mask**pnorm
 
-    # Sum over the m dimension and mean over the batch and pos dimensions
-    return total_loss.sum(dim=-1).mean(dim=[0, 1])
+    # Sum over the m dimension and mean over the other dimensions
+    return total_loss.sum(dim=-1).mean()
 
 
 def calc_schatten_loss_lm(
-    relud_masks: dict[str, Float[Tensor, "batch pos m"]],
+    relud_masks: dict[str, Float[Tensor, "... m"]],
     pnorm: float,
     components: dict[str, LinearComponentWithBias | EmbeddingComponent],
     device: str,
@@ -213,10 +214,11 @@ def calc_schatten_loss_lm(
 
 
 def calc_embedding_recon_loss_lm(
-    model: SSModel,
-    batch: Float[Tensor, "batch pos"],
+    model: ComponentModel,
+    batch: Int[Tensor, "..."],
     component: EmbeddingComponent,
-    masks: list[dict[str, Float[Tensor, "batch pos m"]]],
+    masks: list[dict[str, Float[Tensor, "... m"]]],
+    embed_module_name: str,
     unembed: bool = False,
 ) -> Float[Tensor, ""]:
     """
@@ -229,24 +231,24 @@ def calc_embedding_recon_loss_lm(
     If ``unembed`` is ``False``, the loss is the MSE between the APD-augmented embedding output
     and the target embedding output is used as the loss.
     """
-    module_name = "transformer.wte"
 
     # --- original embedding output --------------------------------------------------------- #
-    orig_module = model.model.get_submodule(module_name)
+    orig_module = model.model.get_submodule(embed_module_name)
     assert isinstance(orig_module, nn.Embedding), (
-        f"Module {module_name} expected to be nn.Embedding, got {type(orig_module)}"
+        f"Module {embed_module_name} expected to be nn.Embedding, got {type(orig_module)}"
     )
-    target_out: Float[Tensor, "batch pos d_emb"] = orig_module(batch)
+    target_out: Float[Tensor, "... d_emb"] = orig_module(batch)
 
     # --- APD-augmented embedding output ---------------------------------------------------- #
     loss = torch.tensor(0.0, device=component.A.device)
     for mask_info in masks:
-        component.mask = mask_info[module_name]
+        component.mask = mask_info[embed_module_name]
 
-        apd_out: Float[Tensor, "batch pos d_emb"] = component(batch)  # type: ignore[arg-type]
+        apd_out: Float[Tensor, "... d_emb"] = component(batch)  # type: ignore[arg-type]
         component.mask = None
 
         if unembed:
+            assert hasattr(model.model, "lm_head"), "Only supports unembedding named lm_head"
             target_out_unembed = model.model.lm_head(target_out)
             apd_out_unembed = model.model.lm_head(apd_out)
             loss += calc_kl_divergence_lm(pred=apd_out_unembed, target=target_out_unembed)
@@ -259,7 +261,7 @@ def calc_embedding_recon_loss_lm(
 
 
 def create_embed_mask_sample_table(
-    masks: dict[str, Float[Tensor, "batch pos m"]],
+    masks: dict[str, Float[Tensor, "... m"]],
 ) -> wandb.Table | None:
     """Create a wandb table visualizing embedding mask values.
 
@@ -292,11 +294,11 @@ def create_embed_mask_sample_table(
 
 
 def optimize_lm(
-    model: SSModel,
+    model: ComponentModel,
     config: Config,
     device: str,
-    train_loader: DataLoader[Float[Tensor, "batch pos"]],
-    eval_loader: DataLoader[Float[Tensor, "batch pos"]],
+    train_loader: DataLoader[Int[Tensor, "..."]],
+    eval_loader: DataLoader[Int[Tensor, "..."]],
     n_eval_steps: int,
     out_dir: Path | None,
 ) -> None:
@@ -361,7 +363,7 @@ def optimize_lm(
             data_iter = iter(train_loader)
             batch = next(data_iter)["input_ids"].to(device)
 
-        (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
+        target_out, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
         )
         As = {module_name: v.A for module_name, v in components.items()}
@@ -456,6 +458,7 @@ def optimize_lm(
                 batch=batch,
                 component=component,
                 masks=random_masks,
+                embed_module_name=next(iter(components.keys())),
                 unembed=config.is_embed_unembed_recon,
             )
             total_loss += config.embedding_recon_coeff * embedding_recon_loss
@@ -474,10 +477,10 @@ def optimize_lm(
                     if value is not None:
                         tqdm.write(f"{name}: {value:.7f}")
 
-                masked_component_logits, _ = model.forward_with_components(
+                masked_component_logits = model.forward_with_components(
                     batch, components=components, masks=masks
                 )
-                unmasked_component_logits, _ = model.forward_with_components(
+                unmasked_component_logits = model.forward_with_components(
                     batch, components=components, masks=None
                 )
 
@@ -489,7 +492,7 @@ def optimize_lm(
                     )
                     alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
 
-                target_logits, _ = model.forward(batch)
+                target_logits = model(batch)
 
                 unmasked_kl_loss = calc_kl_divergence_lm(
                     pred=unmasked_component_logits, target=target_logits
@@ -500,12 +503,12 @@ def optimize_lm(
 
                 ###### CE vs true labels #######
                 flat_all_component_logits = einops.rearrange(
-                    unmasked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                    unmasked_component_logits, "... vocab -> (...) vocab"
                 )
                 flat_masked_component_logits = einops.rearrange(
-                    masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                    masked_component_logits, "... vocab -> (...) vocab"
                 )
-                flat_batch = einops.rearrange(batch, "batch pos -> (batch pos)")
+                flat_batch = batch.flatten()
                 unmasked_ce_loss = F.cross_entropy(
                     input=flat_all_component_logits[:-1], target=flat_batch[1:]
                 )
@@ -513,20 +516,18 @@ def optimize_lm(
                     input=flat_masked_component_logits[:-1], target=flat_batch[1:]
                 )
 
-                flat_target_logits = einops.rearrange(
-                    target_logits, "batch pos vocab -> (batch pos) vocab"
-                )
+                flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
                 target_ce_loss = F.cross_entropy(
                     input=flat_target_logits[:-1], target=flat_batch[1:]
                 )
 
                 # --- CE when every component is fully masked (all-zero masks) --- #
                 zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
-                zero_masked_component_logits, _ = model.forward_with_components(
+                zero_masked_component_logits = model.forward_with_components(
                     batch, components=components, masks=zero_masks
                 )
                 flat_zero_masked_component_logits = einops.rearrange(
-                    zero_masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                    zero_masked_component_logits, "... vocab -> (...) vocab"
                 )
                 zero_masked_ce_loss = F.cross_entropy(
                     input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
@@ -626,24 +627,30 @@ def main(
     )
 
     # --- Load Model --- #
-    logger.info(f"Loading model: {config.task_config.model_size}")
-    model_config_dict = MODEL_CONFIGS[config.task_config.model_size]
-    model_path = f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}"
-    model = Llama.from_pretrained(model_path, model_config_dict)
+    logger.info("Loading base language model ...")
 
-    ss_model = SSModel(
-        llama_model=model,
+    assert config.pretrained_model_name is not None, (
+        "`pretrained_model_path` must be specified in the config when using ComponentModel."
+    )
+
+    base_model = load_pretrained(
+        path_to_class=config.pretrained_model_class, model_name_or_path=config.pretrained_model_name
+    )
+
+    comp_model = ComponentModel(
+        base_model=base_model,
         target_module_patterns=config.task_config.target_module_patterns,
         m=config.m,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
+        pretrained_model_output_attr=config.pretrained_model_output_attr,
     )
-    ss_model.to(device)
+    comp_model.to(device)
     logger.info("Model loaded.")
 
     # --- Setup Run Name and Output Dir --- #
     run_name = get_run_name(
         config,
-        model_size=config.task_config.model_size,
+        pretrained_model_name=config.pretrained_model_name,
         max_seq_len=config.task_config.max_seq_len,
     )
     if config.wandb_project:
@@ -664,13 +671,12 @@ def main(
     logger.info("Loading dataset...")
     train_data_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        tokenizer_file_path=None,
-        hf_tokenizer_path=model_path,
+        hf_tokenizer_path=config.pretrained_model_name,
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
         streaming=False,
-        column_name="story",
+        column_name=config.task_config.column_name,
     )
 
     train_loader, tokenizer = create_data_loader(
@@ -684,13 +690,12 @@ def main(
 
     eval_data_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        tokenizer_file_path=None,
-        hf_tokenizer_path=model_path,
+        hf_tokenizer_path=config.pretrained_model_name,
         split=config.task_config.eval_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
         streaming=False,
-        column_name="story",
+        column_name=config.task_config.column_name,
     )
     eval_loader, _ = create_data_loader(
         dataset_config=eval_data_config,
@@ -704,13 +709,13 @@ def main(
     logger.info("Dataset and tokenizer loaded.")
 
     logger.info("Freezing target model parameters...")
-    for param in ss_model.model.parameters():
+    for param in comp_model.model.parameters():
         param.requires_grad = False
     logger.info("Target model frozen.")
 
     logger.info("Starting optimization...")
     optimize_lm(
-        model=ss_model,
+        model=comp_model,
         config=config,
         device=device,
         train_loader=train_loader,

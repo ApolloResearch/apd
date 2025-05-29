@@ -16,12 +16,12 @@ import streamlit as st
 import torch
 from datasets import load_dataset
 from jaxtyping import Float, Int
-from simple_stories_train.dataloaders import DatasetConfig
 from torch import Tensor
 from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
-from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
+from spd.data import DatasetConfig
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
@@ -35,7 +35,7 @@ DEFAULT_MODEL_PATH: ModelPath = "wandb:spd-lm/runs/151bsctx"
 # -----------------------------------------------------------
 @dataclass(frozen=True)
 class AppData:
-    model: SSModel
+    model: ComponentModel
     tokenizer: AutoTokenizer
     config: Config
     dataloader_iter_fn: Callable[[], Iterator[dict[str, Any]]]
@@ -54,7 +54,7 @@ def initialize(model_path: ModelPath) -> AppData:
     """
     device = "cpu"  # Use CPU for the Streamlit app
     logger.info(f"Initializing app with model: {model_path} on device: {device}")
-    ss_model, config, _ = SSModel.from_pretrained(model_path)
+    ss_model, config, _ = ComponentModel.from_pretrained(model_path)
     ss_model.to(device)
     ss_model.eval()
 
@@ -62,7 +62,7 @@ def initialize(model_path: ModelPath) -> AppData:
     assert isinstance(task_config, LMTaskConfig), "Task config must be LMTaskConfig for this app."
 
     # Derive tokenizer path (adjust if stored differently)
-    tokenizer_path = f"chandan-sreedhara/SimpleStories-{task_config.model_size}"
+    tokenizer_path = config.pretrained_model_name
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path,
         add_bos_token=False,
@@ -398,7 +398,7 @@ if __name__ == "__main__":
         "--model_path",
         type=str,
         default=DEFAULT_MODEL_PATH,
-        help=f"Path or W&B reference to the trained SSModel. Default: {DEFAULT_MODEL_PATH}",
+        help=f"Path or W&B reference to the trained ComponentModel. Default: {DEFAULT_MODEL_PATH}",
     )
     args = parser.parse_args()
 

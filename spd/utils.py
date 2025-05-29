@@ -1,3 +1,4 @@
+import importlib
 import random
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Any, Generic, Literal, TypeVar
 import einops
 import numpy as np
 import torch
+import torch.nn as nn
 import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, PositiveFloat
@@ -60,12 +62,12 @@ def load_config(config_path_or_obj: Path | str | T, config_model: type[T]) -> T:
     if isinstance(config_path_or_obj, str):
         config_path_or_obj = Path(config_path_or_obj)
 
-    assert isinstance(
-        config_path_or_obj, Path
-    ), f"passed config is of invalid type {type(config_path_or_obj)}"
-    assert (
-        config_path_or_obj.suffix == ".yaml"
-    ), f"Config file {config_path_or_obj} must be a YAML file."
+    assert isinstance(config_path_or_obj, Path), (
+        f"passed config is of invalid type {type(config_path_or_obj)}"
+    )
+    assert config_path_or_obj.suffix == ".yaml", (
+        f"Config file {config_path_or_obj} must be a YAML file."
+    )
     assert Path(config_path_or_obj).exists(), f"Config file {config_path_or_obj} does not exist."
     with open(config_path_or_obj) as f:
         config_dict = yaml.safe_load(f)
@@ -426,3 +428,30 @@ def replace_deprecated_param_names(
                 params[k.replace(old_name, new_name)] = params[k]
                 del params[k]
     return params
+
+
+def resolve_class(path: str) -> type[nn.Module]:
+    """Load a class from a string indicating its import path.
+
+    Args:
+        path: The path to the class, e.g. "transformers.LlamaForCausalLM" or
+            "spd.experiments.resid_mlp.models.ResidMLP"
+    """
+    module_path, _, class_name = path.rpartition(".")
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+def load_pretrained(path_to_class: str, model_name_or_path: Path | str, **kwargs: Any) -> nn.Module:
+    """Load a model from a path to the class and a model name or path.
+
+    Args:
+        path_to_class: The path to the class, e.g. "transformers.LlamaForCausalLM" or
+            "spd.experiments.resid_mlp.models.ResidMLP"
+        model_name_or_path: The path to the model, e.g. "SimpleStories/SimpleStories-1.25M" or
+            "wandb:spd-train-resid-mlp/runs/zas5yjdl" or "/path/to/model/checkpoint"
+    """
+    model_cls = resolve_class(path_to_class)
+    if not hasattr(model_cls, "from_pretrained"):
+        raise TypeError(f"{model_cls} lacks a `from_pretrained` method.")
+    return model_cls.from_pretrained(model_name_or_path, **kwargs)

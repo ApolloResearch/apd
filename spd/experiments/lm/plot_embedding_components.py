@@ -9,16 +9,16 @@ from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.lm.models import EmbeddingComponent, SSModel
+from spd.experiments.lm.models import EmbeddingComponent, LinearComponent
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
 
 
-def collect_embedding_masks(model: SSModel, device: str) -> Float[Tensor, "vocab m"]:
+def collect_embedding_masks(model: LinearComponent, device: str) -> Float[Tensor, "vocab m"]:
     """Collect masks for each vocab token.
 
     Args:
-        model: The trained SSModel
+        model: The trained LinearComponent
         device: Device to run computation on
 
     Returns:
@@ -152,7 +152,7 @@ def main(model_path: str | Path) -> None:
         model_path: Path to the model checkpoint
     """
     # Load model
-    model, config, out_dir = SSModel.from_pretrained(model_path)
+    model, config, out_dir = LinearComponent.from_pretrained(model_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
