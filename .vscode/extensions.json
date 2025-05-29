@@ -1,7 +1,6 @@
 {
     "recommendations": [
         "ms-toolsai.jupyter",
-        "ms-python.python",
         "charliermarsh.ruff",
         "stkb.rewrap"
     ]

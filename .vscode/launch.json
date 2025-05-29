@@ -4,6 +4,9 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
+        
+        
         {
             "name": "Python: Attach",
             "type": "debugpy",
@@ -19,6 +22,18 @@
             "request": "launch",
             "program": "${workspaceFolder}/spd/experiments/tms/tms_decomposition.py",
             "args": "${workspaceFolder}/spd/experiments/tms/tms_config.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYDEVD_DISABLE_FILE_VALIDATION": "1"
+            }
+        },
+        {
+            "name": "tms_plotting",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/spd/experiments/tms/plotting.py",
+            "args": "",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {

@@ -1,58 +1,63 @@
 # # TMS 5-2
-# wandb_project: spd-tms
-# wandb_run_name: null
-# wandb_run_name_prefix: ""
-# unit_norm_matrices: false
-# seed: 0
-# param_match_coeff: 1.0
-# masked_recon_coeff: 1
-# pnorm: 0.9
-# lp_sparsity_coeff: 1.0
-# random_mask_recon_coeff: 1.0
-# n_random_masks: 2
-# batch_size: 2048
-# steps: 20_000
-# image_freq: 5_000
-# print_freq: 1_000
-# save_freq: 20_000
-# lr: 3e-2
-# lr_schedule: constant
-# lr_warmup_pct: 0.05
-# task_config:
-#   task_name: tms
-#   feature_probability: 0.05
-#   data_generation_type: "at_least_zero_active"
-#   pretrained_model_path: "wandb:spd-train-tms/runs/cv3g3z9d" # Local or wandb path
-
-# TMS 40-10
 wandb_project: spd-tms
 wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
-m: 100
+m: 20
 param_match_coeff: 1.0
-masked_recon_coeff: 1.0
-pnorm: 0.9
-lp_sparsity_coeff: 1e-4
-random_mask_recon_coeff: 1
+masked_recon_coeff: 0.0
+pnorm: 3.0
+lp_sparsity_coeff: 0.05
+random_mask_recon_coeff: 1.0
 n_random_masks: 1
-# n_gate_hidden_neurons: 8
-n_gate_hidden_neurons: null
-layerwise_recon_coeff: 1.0
-layerwise_random_recon_coeff: 1.0
 batch_size: 2048
 steps: 30_000
 image_freq: 5_000
-print_freq: 1000
+print_freq: 1_000
 save_freq: 20_000
 lr: 1e-3
 lr_schedule: constant
-lr_warmup_pct: 0.05
-init_from_target_model: false
+lr_warmup_pct: 0.0
 task_config:
   task_name: tms
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
-  # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
-  pretrained_model_path: "wandb:spd-train-tms/runs/me2x5oeo" # 1 hidden layer fixed to identity
+  pretrained_model_path: '/mnt/polished-lake/home/lee/apd/spd/experiments/tms/out/tms_n-features5_n-hidden2_n-hidden-layers0_n-instances10_feat_prob0.05_seed0_20250528_104004_350/tms.pth'
+  
+  # '/mnt/polished-lake/home/lee/apd/spd/experiments/tms/out/tms_n-features5_n-hidden2_n-hidden-layers0_n-instances10_feat_prob0.05_seed0_20250528_104004_350/tms.pth' # tms 5-2 no identity
+  # '/mnt/polished-lake/home/lee/apd/spd/experiments/tms/out/tms_n-features5_n-hidden2_n-hidden-layers1_n-instances10_feat_prob0.05_seed0_fixed-identity_20250529_094535_177/tms.pth' # tms 5-2 with identity
+  #"wandb:spd-train-tms/runs/cv3g3z9d" # Local or wandb path
+
+# TMS 40-10
+# wandb_project: spd-tms
+# wandb_run_name: null
+# wandb_run_name_prefix: ""
+# unit_norm_matrices: false
+# seed: 0
+# m: 100
+# param_match_coeff: 1.0
+# masked_recon_coeff: 1.0
+# pnorm: 0.9
+# lp_sparsity_coeff: 1e-4
+# random_mask_recon_coeff: 1
+# n_random_masks: 1
+# # n_gate_hidden_neurons: 8
+# n_gate_hidden_neurons: null
+# layerwise_recon_coeff: 1.0
+# layerwise_random_recon_coeff: 1.0
+# batch_size: 2048
+# steps: 30_000
+# image_freq: 5_000
+# print_freq: 1000
+# save_freq: 20_000
+# lr: 1e-3
+# lr_schedule: constant
+# lr_warmup_pct: 0.05
+# init_from_target_model: false
+# task_config:
+#   task_name: tms
+#   feature_probability: 0.05
+#   data_generation_type: "at_least_zero_active"
+#   # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
+#   pretrained_model_path: "wandb:spd-train-tms/runs/me2x5oeo" # 1 hidden layer fixed to identity
