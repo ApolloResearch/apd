@@ -16,11 +16,12 @@ from torch import Tensor
 
 from spd.configs import Config, ResidualMLPTaskConfig
 from spd.experiments.lm.lm_decomposition import optimize_lm
-from spd.experiments.resid_mlp.models import (
-    ResidualMLPModel,
-)
+from spd.experiments.lm.models import ComponentModel
+from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponentWithBias
+from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix
 from spd.utils import DatasetGeneratedDataLoader, get_device, load_config, set_seed
 from spd.wandb_utils import init_wandb
@@ -89,6 +90,30 @@ def plot_subnetwork_attributions(
         )
         fig.savefig(out_dir / filename, dpi=200)
     return fig
+
+
+def resid_mlp_plot_results_fn(
+    model: ComponentModel,
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    gates: dict[str, Gate | GateMLP],
+    batch_shape: tuple[int, ...],
+    device: str,
+    **_,
+) -> dict[str, plt.Figure]:
+    fig_dict = {}
+
+    fig_dict["masks"], all_perm_indices = plot_mask_vals(
+        model=model,
+        components=components,
+        gates=gates,
+        batch_shape=batch_shape,
+        device=device,
+        input_magnitude=0.75,
+    )
+    fig_dict["AB_matrices"] = plot_AB_matrices(
+        components=components, all_perm_indices=all_perm_indices
+    )
+    return fig_dict
 
 
 def save_target_model_info(
@@ -188,7 +213,7 @@ def main(
         eval_loader=eval_loader,
         n_eval_steps=config.n_eval_steps,
         out_dir=out_dir,
-        # plot_results_fn=resid_mlp_plot_results_fn,
+        plot_results_fn=resid_mlp_plot_results_fn,
     )
 
     if config.wandb_project:

@@ -21,9 +21,9 @@ from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
 from spd.data import DatasetConfig
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
 from spd.log import logger
-from spd.models.components import Gate, GateMLP
+from spd.models.components import Gate, GateMLP, LinearComponentWithBias
 from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
 

@@ -12,6 +12,7 @@ from spd.module_utils import init_param_
 
 def leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
     return torch.where(x > 0, x, alpha * x)
+    # return F.leaky_relu(x, negative_slope=alpha)
 
 
 def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
@@ -317,3 +318,42 @@ class EmbeddingComponent(nn.Module):
 
         out = self.hook_post(out)
         return out
+
+
+class LinearComponentWithBias(nn.Module):
+    """A LinearComponent with a bias parameter."""
+
+    def __init__(self, linear_component: LinearComponent, bias: Tensor | None):
+        super().__init__()
+        self.linear_component = linear_component
+        self.bias = bias
+        self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
+        self.A = linear_component.A
+        self.B = linear_component.B
+
+    @property
+    def weight(self) -> Float[Tensor, "... d_in d_out"]:
+        return self.linear_component.weight
+
+    def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
+        # Note: We assume bias is added *after* the component multiplication
+        # Also assume input is (batch, seq_len, d_in)
+        out = self.linear_component(x, mask=self.mask)
+        if self.bias is not None:
+            out += self.bias
+        return out
+
+
+def linear_module_to_component(
+    linear_module: nn.Linear,
+    m: int,
+) -> LinearComponentWithBias:
+    """Convert an nn.Linear into a LinearComponentWithBias."""
+    d_out, d_in = linear_module.weight.shape
+    linear_component = LinearComponent(d_in=d_in, d_out=d_out, m=m, n_instances=None)
+    # # Initialize with A = W (original weights) and B = I (identity)
+    # # This provides a starting point where the component exactly equals the original
+    # linear_component.A.data[:] = linear_module.weight.t()  # (d_in, m)
+    # linear_component.B.data[:] = torch.eye(m)
+    bias = linear_module.bias if linear_module.bias is not None else None  # type: ignore
+    return LinearComponentWithBias(linear_component, bias)

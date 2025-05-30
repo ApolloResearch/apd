@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader
 
 from spd.configs import LMTaskConfig
 from spd.data import DatasetConfig, create_data_loader
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
 from spd.log import logger
-from spd.models.components import Gate, GateMLP
+from spd.models.components import Gate, GateMLP, LinearComponentWithBias
 from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
 from spd.utils import extract_batch_data

@@ -7,8 +7,8 @@ from transformers import AutoTokenizer, LlamaForCausalLM
 from spd.experiments.lm.models import (
     ComponentModel,
     EmbeddingComponent,
-    LinearComponentWithBias,
 )
+from spd.models.components import LinearComponentWithBias
 
 # %%
 print("Loading base language model ...")

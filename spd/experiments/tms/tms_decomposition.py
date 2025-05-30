@@ -21,7 +21,7 @@ from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
-from spd.plotting import plot_AB_matrices, plot_mask_vals
+from spd.plotting import plot_AB_matrices_tms, plot_mask_vals_tms
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -60,10 +60,10 @@ def make_plots(
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
-    plots["masks"], all_perm_indices = plot_mask_vals(
+    plots["masks"], all_perm_indices = plot_mask_vals_tms(
         model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
     )
-    plots["AB_matrices"] = plot_AB_matrices(
+    plots["AB_matrices"] = plot_AB_matrices_tms(
         model=model, device=device, all_perm_indices=all_perm_indices
     )
     return plots

@@ -166,9 +166,19 @@ class ResidualMLPModel(nn.Module):
         with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
 
+        # Remove n_instances, apply_output_act_fn, and init_scale from the arguments
+        # For backward compatibility
+        resid_mlp_train_config_dict["resid_mlp_config"].pop("n_instances", None)
+        resid_mlp_train_config_dict["resid_mlp_config"].pop("apply_output_act_fn", None)
+        resid_mlp_train_config_dict["resid_mlp_config"].pop("init_scale", None)
         resid_mlp_config = ResidualMLPConfig(**resid_mlp_train_config_dict["resid_mlp_config"])
         resid_mlp = cls(resid_mlp_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
+        # Squeeze all parameters
+        params = {k: v.squeeze() for k, v in params.items()}
+        # Rename "layers.0.linear1" to "layers.0.mlp_in.weight" for each layer
+        params["layers.0.mlp_in.weight"] = params.pop("layers.0.linear1").T
+        params["layers.0.mlp_out.weight"] = params.pop("layers.0.linear2").T
         resid_mlp.load_state_dict(params)
 
         return resid_mlp, resid_mlp_train_config_dict, label_coeffs

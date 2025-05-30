@@ -8,18 +8,38 @@ from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
+from spd.experiments.lm.models import ComponentModel
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.models.components import Gate, GateMLP
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponentWithBias
 from spd.module_utils import collect_nested_module_attrs
 from spd.run_spd import calc_component_acts, calc_masks
 
 
 def permute_to_identity(
-    mask: Float[Tensor, "batch n_instances m"],
-) -> tuple[Float[Tensor, "batch n_instances m"], Float[Tensor, "n_instances m"]]:
-    """Returns (permuted_mask, permutation_indices)"""
-    batch, n_instances, m = mask.shape
+    mask: Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"],
+) -> tuple[
+    Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"],
+    Float[Tensor, "n_instances m"] | Float[Tensor, " m"],
+]:
+    """Returns (permuted_mask, permutation_indices)
+
+    Supports both (batch, m) and (batch, n_instances, m) shaped masks.
+    For (batch, m) input, returns (batch, m) mask and (m,) permutation indices.
+    For (batch, n_instances, m) input, returns (batch, n_instances, m) mask and (n_instances, m) permutation indices.
+    """
+
+    original_shape = mask.shape
+    if mask.ndim == 2:
+        # Add instance dimension: (batch, m) -> (batch, 1, m)
+        mask = mask.unsqueeze(1)
+        batch, n_instances, m = mask.shape
+        assert n_instances == 1
+    elif mask.ndim == 3:
+        batch, n_instances, m = mask.shape
+    else:
+        raise ValueError(f"Mask must have 2 or 3 dimensions, got {mask.ndim}")
+
     new_mask = mask.clone()
     effective_rows = min(batch, m)
     # Store permutation indices for each instance
@@ -42,10 +62,92 @@ def permute_to_identity(
         new_mask[:, inst, :] = mat[:, perm]
         perm_indices[inst] = torch.tensor(perm, device=mask.device)
 
+    # Return in original shape
+    if len(original_shape) == 2:
+        # Remove instance dimension: (batch, 1, m) -> (batch, m)
+        new_mask = new_mask.squeeze(1)
+        perm_indices = perm_indices.squeeze(0)  # (1, m) -> (m)
+
     return new_mask, perm_indices
 
 
 def plot_mask_vals(
+    model: ComponentModel,
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    gates: dict[str, Gate | GateMLP],
+    batch_shape: tuple[int, ...],
+    device: str,
+    input_magnitude: float,
+) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
+    """Plot the values of the mask for a batch of inputs with single active features."""
+    # First, create a batch of inputs with single active features
+    has_pos_dim = len(batch_shape) == 3
+    n_features = batch_shape[-1]
+    batch = torch.eye(n_features, device=device) * input_magnitude
+    if has_pos_dim:
+        # NOTE: For now, we only plot the mask of the first pos dim
+        batch = batch.unsqueeze(1)
+
+    # Get mask values
+    pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
+        batch, module_names=list(components.keys())
+    )[1]
+    As = {module_name: v.A for module_name, v in components.items()}
+
+    target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
+
+    relud_masks_raw = calc_masks(
+        gates=gates,
+        target_component_acts=target_component_acts,
+        attributions=None,
+        detach_inputs=False,
+    )[1]
+
+    relud_masks = {}
+    all_perm_indices = {}
+    for k, v in relud_masks_raw.items():
+        relud_masks[k], all_perm_indices[k] = permute_to_identity(mask=v)
+
+    # Create figure with better layout and sizing
+    fig, axs = plt.subplots(
+        len(relud_masks),
+        1,
+        figsize=(5, 5 * len(relud_masks)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axs = np.array(axs)
+
+    images = []
+    for j, (mask_name, mask) in enumerate(relud_masks.items()):
+        # mask has shape (batch, m) or (batch, pos, m)
+        mask_data = mask.detach().cpu().numpy()
+        if has_pos_dim:
+            assert mask_data.ndim == 3
+            mask_data = mask_data[:, 0, :]
+        im = axs[j, 0].matshow(mask_data, aspect="auto", cmap="Reds")
+        images.append(im)
+
+        axs[j, 0].set_xlabel("Mask index")
+        axs[j, 0].set_ylabel("Input feature index")
+        axs[j, 0].set_title(mask_name)
+
+    # Add unified colorbar
+    norm = plt.Normalize(
+        vmin=min(mask.min().item() for mask in relud_masks.values()),
+        vmax=max(mask.max().item() for mask in relud_masks.values()),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+
+    # Add a title which shows the input magnitude
+    fig.suptitle(f"Input magnitude: {input_magnitude}")
+
+    return fig, all_perm_indices
+
+
+def plot_mask_vals_tms(
     model: SPDModel,
     target_model: HookedRootModule,
     gates: dict[str, Gate | GateMLP],
@@ -199,6 +301,64 @@ def plot_matrix(
 
 
 def plot_AB_matrices(
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
+) -> plt.Figure:
+    """Plot A and B matrices for each instance, grouped by layer."""
+    As = {k: v.A for k, v in components.items()}
+    Bs = {k: v.B for k, v in components.items()}
+
+    n_layers = len(As)
+
+    # Create figure for plotting - 2 rows per layer (A and B)
+    fig, axs = plt.subplots(
+        2 * n_layers,
+        1,
+        figsize=(5, 5 * 2 * n_layers),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axs = np.array(axs)
+
+    images = []
+
+    # Plot A and B matrices for each layer
+    for j, name in enumerate(sorted(As.keys())):
+        # Plot A matrix
+        A_data = As[name]
+        if all_perm_indices is not None:
+            A_data = A_data[:, all_perm_indices[name]]
+        A_data = A_data.detach().cpu().numpy()
+        im = axs[2 * j, 0].matshow(A_data, aspect="auto", cmap="coolwarm")
+        axs[2 * j, 0].set_ylabel("d_in index")
+        axs[2 * j, 0].set_xlabel("Component index")
+        axs[2 * j, 0].set_title(f"{name} (A matrix)")
+        images.append(im)
+
+        # Plot B matrix
+        B_data = Bs[name]
+        if all_perm_indices is not None:
+            B_data = B_data[all_perm_indices[name], :]
+        B_data = B_data.detach().cpu().numpy()
+        im = axs[2 * j + 1, 0].matshow(B_data, aspect="auto", cmap="coolwarm")
+        axs[2 * j + 1, 0].set_ylabel("Component index")
+        axs[2 * j + 1, 0].set_xlabel("d_out index")
+        axs[2 * j + 1, 0].set_title(f"{name} (B matrix)")
+        images.append(im)
+
+    # Add unified colorbar
+    all_matrices = list(As.values()) + list(Bs.values())
+    norm = plt.Normalize(
+        vmin=min(M.min().item() for M in all_matrices),
+        vmax=max(M.max().item() for M in all_matrices),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+    return fig
+
+
+def plot_AB_matrices_tms(
     model: SPDModel,
     device: str,
     all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,

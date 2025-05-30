@@ -50,7 +50,6 @@ class LMTaskConfig(BaseModel):
     eval_data_split: str = "test"
     # TODO: Move to main config when supported by TMS
     # List of fnmatch patterns for nn.Linear modules to decompose
-    target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
 
 
 class Config(BaseModel):
@@ -67,6 +66,7 @@ class Config(BaseModel):
     n_random_masks: PositiveInt
     n_gate_hidden_neurons: PositiveInt | None = None
     init_from_target_model: bool = False
+    target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
 
     # --- Loss Coefficients
     out_recon_coeff: NonNegativeFloat | None = None

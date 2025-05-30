@@ -1,5 +1,6 @@
 """Language Model decomposition script."""
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -23,9 +24,9 @@ from spd.experiments.lm.component_viz import (
     component_activation_statistics,
     plot_mean_component_activation_counts,
 )
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent, LinearComponentWithBias
+from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
 from spd.log import logger
-from spd.models.components import Gate, GateMLP
+from spd.models.components import Gate, GateMLP, LinearComponentWithBias
 from spd.run_spd import (
     _calc_param_mse,
     calc_component_acts,
@@ -67,14 +68,12 @@ def get_run_name(
 
 def plot_lm_results(
     mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
-) -> dict[str, plt.Figure]:
+) -> plt.Figure:
     """Plotting function for LM decomposition."""
-    fig_dict: dict[str, plt.Figure] = {}
 
-    fig_dict["mean_component_activation_counts"] = plot_mean_component_activation_counts(
+    return plot_mean_component_activation_counts(
         mean_component_activation_counts=mean_component_activation_counts,
     )
-    return fig_dict
 
 
 def calc_recon_mse_lm(
@@ -294,16 +293,59 @@ def create_embed_mask_sample_table(
     return wandb.Table(data=table_data, columns=component_names)
 
 
+def init_As_and_Bs_(
+    model: ComponentModel, components: dict[str, LinearComponentWithBias | EmbeddingComponent]
+) -> None:
+    """Initialize the A and B matrices using a scale factor from the target weights."""
+    for param_name, component in components.items():
+        A = component.A
+        B = component.B
+        target_weight = model.model.get_parameter(param_name + ".weight").T
+        # Make A and B have unit norm in the d_in and d_out dimensions
+        A.data[:] = torch.randn_like(A.data)
+        B.data[:] = torch.randn_like(B.data)
+
+        # Make A and B have unit norm in the d_in and d_out dimensions
+        A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
+        B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
+
+        m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_in d_out -> m")
+        B.data[:] = B.data * m_norms.unsqueeze(-1)
+
+    # As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+    # Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
+    # for param_name in As:
+    #     A = As[param_name]  # (..., d_in, m)
+    #     B = Bs[param_name]  # (..., m, d_out)
+    #     target_weight = get_nested_module_attr(
+    #         target_model, param_name + ".weight"
+    #     )  # (..., d_in, d_out)
+
+    #     # Make A and B have unit norm in the d_in and d_out dimensions
+    #     A.data[:] = torch.randn_like(A.data)
+    #     B.data[:] = torch.randn_like(B.data)
+    #     A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
+    #     B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
+
+    #     m_norms = einops.einsum(
+    #         A, B, target_weight, "... d_in m, ... m d_out, ... d_in d_out -> ... m"
+    #     )
+    #     # Scale B by m_norms. We leave A as is since this may get scaled with the unit_norm_matrices
+    #     # config options.
+    #     B.data[:] = B.data * m_norms.unsqueeze(-1)
+
+
 def optimize_lm(
     target_model: nn.Module,
     config: Config,
     device: str,
     train_loader: DataLoader[Int[Tensor, "..."]]
-    | DataLoader[Float[Tensor, "..."], Float[Tensor, "..."]],
+    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
     eval_loader: DataLoader[Int[Tensor, "..."]]
-    | DataLoader[Float[Tensor, "..."], Float[Tensor, "..."]],
+    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
     n_eval_steps: int,
     out_dir: Path | None,
+    plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
 ) -> None:
     """Run the optimization loop for LM decomposition."""
 
@@ -315,6 +357,7 @@ def optimize_lm(
         pretrained_model_output_attr=config.pretrained_model_output_attr,
     )
     model.to(device)
+
     logger.info("Model loaded.")
     logger.info("Freezing target model parameters...")
     for param in target_model.parameters():
@@ -327,6 +370,8 @@ def optimize_lm(
     components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
+
+    init_As_and_Bs_(model=model, components=components)
 
     component_params: list[torch.nn.Parameter] = []
     gate_params: list[torch.nn.Parameter] = []
@@ -577,12 +622,23 @@ def optimize_lm(
                 and (step > 0 or config.image_on_first_step)
             ):
                 logger.info(f"Step {step}: Generating plots...")
+                fig_dict = {}
+                if plot_results_fn is not None:
+                    fig_dict = plot_results_fn(
+                        model=model,
+                        components=components,
+                        gates=gates,
+                        batch_shape=batch.shape,
+                        device=device,
+                    )
                 mean_component_activation_counts = component_activation_statistics(
                     model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
                 )[1]
                 assert mean_component_activation_counts is not None
-                fig_dict = plot_lm_results(
-                    mean_component_activation_counts=mean_component_activation_counts,
+                fig_dict["mean_component_activation_counts"] = (
+                    plot_mean_component_activation_counts(
+                        mean_component_activation_counts=mean_component_activation_counts,
+                    )
                 )
 
                 if config.wandb_project:
