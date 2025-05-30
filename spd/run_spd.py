@@ -112,7 +112,7 @@ def calc_lp_sparsity_loss(
     total_loss = torch.zeros_like(next(iter(relud_masks.values())))
 
     for layer_relud_mask in relud_masks.values():
-        total_loss = total_loss + layer_relud_mask**pnorm
+        total_loss = total_loss + torch.abs(layer_relud_mask) ** pnorm
 
     # Sum over the m dimension and mean over the batch dimension
     return total_loss.sum(dim=-1).mean(dim=0)

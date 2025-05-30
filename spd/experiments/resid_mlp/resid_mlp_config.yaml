@@ -4,26 +4,26 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
-m: 100
+m: 200
 param_match_coeff: 1.0
-masked_recon_coeff: 1.0
+masked_recon_coeff: 0.0
 # act_recon_coeff: 1
 random_mask_recon_coeff: 1.0
 n_random_masks: 1
-n_gate_hidden_neurons: null
+n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
-layerwise_recon_coeff: 1.0
+layerwise_recon_coeff: 0.0
 layerwise_random_recon_coeff: 1.0
-pnorm: 0.9
-lp_sparsity_coeff: 3e-2
-batch_size: 256
-steps: 20_000
+pnorm: 2.0
+lp_sparsity_coeff: 1e-5
+batch_size: 2048
+steps: 30_000
 image_freq: 5_000
 print_freq: 100
-save_freq: 10_000
-lr: 1e-3
-lr_schedule: cosine
-lr_warmup_pct: 0.01
+save_freq: null
+lr: 3e-3
+lr_schedule: constant
+lr_warmup_pct: 0.0
 image_on_first_step: true
 init_from_target_model: false
 task_config:

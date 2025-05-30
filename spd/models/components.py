@@ -14,6 +14,14 @@ def hard_sigmoid(x: Tensor) -> Tensor:
     return F.relu(torch.clamp(x, max=1))
 
 
+def upper_leaky_hard_sigmoid(x: Tensor) -> Tensor:
+    return torch.where(x > 1, 1 + 0.01 * (x - 1), F.relu(x))
+
+
+def lower_leaky_hard_sigmoid(x: Tensor) -> Tensor:
+    return F.leaky_relu(torch.clamp(x, max=1))
+
+
 class Gate(nn.Module):
     """A gate that maps a single input to a single output."""
 
@@ -59,12 +67,12 @@ class GateMLP(nn.Module):
         out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
 
         self.mlp_in = nn.Parameter(torch.empty(shape))
-        self.in_bias = nn.Parameter(torch.empty(in_bias_shape))
+        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
         self.mlp_out = nn.Parameter(torch.empty(shape))
         self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
-        init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
+        # init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(
@@ -92,12 +100,14 @@ class GateMLP(nn.Module):
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return hard_sigmoid(self._compute_pre_activation(x))
+        # return hard_sigmoid(self._compute_pre_activation(x))
+        return lower_leaky_hard_sigmoid(self._compute_pre_activation(x))
 
     def forward_relu(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return F.relu(self._compute_pre_activation(x))
+        # return F.relu(self._compute_pre_activation(x))
+        return upper_leaky_hard_sigmoid(self._compute_pre_activation(x))
 
 
 class Linear(nn.Module):
