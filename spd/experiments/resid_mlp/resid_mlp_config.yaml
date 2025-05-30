@@ -6,18 +6,19 @@ unit_norm_matrices: false
 seed: 0
 m: 200
 param_match_coeff: 1.0
-masked_recon_coeff: 0.0
+masked_recon_coeff: null
 # act_recon_coeff: 1
 random_mask_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
-layerwise_recon_coeff: 0.0
+layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
+output_loss_type: mse
 pnorm: 2
 lp_sparsity_coeff: 1e-5
 batch_size: 2048
-steps: 60_000
+steps: 30_000
 image_freq: 5_000
 print_freq: 100
 save_freq: null

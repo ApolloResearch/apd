@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import einops
 import fire
@@ -76,16 +77,6 @@ def plot_lm_results(
     )
 
 
-def calc_recon_mse_lm(
-    out1: Float[Tensor, "... vocab"],
-    out2: Float[Tensor, "... vocab"],
-) -> Float[Tensor, ""]:
-    """Calculate the Mean Squared Error reconstruction loss for LM logits."""
-    assert out1.shape == out2.shape
-    # Mean over batch and sequence length, sum over vocab
-    return ((out1 - out2) ** 2).sum(dim=-1).mean()
-
-
 def calc_kl_divergence_lm(
     pred: Float[Tensor, "... vocab"],
     target: Float[Tensor, "... vocab"],
@@ -135,6 +126,7 @@ def calc_layerwise_recon_loss_lm(
     components: dict[str, LinearComponentWithBias | EmbeddingComponent],
     masks: list[dict[str, Float[Tensor, "... m"]]],
     target_out: Float[Tensor, "... d_model_out"],
+    loss_type: Literal["mse", "kl"] = "kl",
 ) -> Float[Tensor, ""]:
     """Calculate the recon loss when augmenting the model one (masked) component at a time."""
     total_loss = torch.tensor(0.0, device=device)
@@ -147,7 +139,12 @@ def calc_layerwise_recon_loss_lm(
                 component=component,
                 mask=mask_info[component_name],
             )
-            loss = calc_kl_divergence_lm(pred=modified_out, target=target_out)
+            if loss_type == "mse":
+                loss = ((modified_out - target_out) ** 2).mean()
+            elif loss_type == "kl":
+                loss = calc_kl_divergence_lm(pred=modified_out, target=target_out)
+            else:
+                raise ValueError(f"Invalid loss type: {loss_type}")
             total_loss += loss
     n_modified_components = len(masks[0])
     return total_loss / (n_modified_components * len(masks))
@@ -293,6 +290,28 @@ def create_embed_mask_sample_table(
     return wandb.Table(data=table_data, columns=component_names)
 
 
+def calc_masked_recon_loss(
+    model: ComponentModel,
+    batch: Float[Tensor, "... d_in"],
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    masks: dict[str, Float[Tensor, "... m"]],
+    target_out: Float[Tensor, "... d_mdoel_out"],
+    loss_type: Literal["mse", "kl"] = "mse",
+) -> Float[Tensor, ""]:
+    """Calculate the MSE over all masks."""
+    # Do a forward pass with all components
+    out_masked_random_mask = model.forward_with_components(
+        batch, components=components, masks=masks
+    )
+    if loss_type == "mse":
+        loss = ((out_masked_random_mask - target_out) ** 2).mean()
+    elif loss_type == "kl":
+        loss = calc_kl_divergence_lm(pred=out_masked_random_mask, target=target_out)
+    else:
+        raise ValueError(f"Invalid loss type: {loss_type}")
+    return loss
+
+
 def init_As_and_Bs_(
     model: ComponentModel, components: dict[str, LinearComponentWithBias | EmbeddingComponent]
 ) -> None:
@@ -311,28 +330,6 @@ def init_As_and_Bs_(
 
         m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_in d_out -> m")
         B.data[:] = B.data * m_norms.unsqueeze(-1)
-
-    # As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-    # Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
-    # for param_name in As:
-    #     A = As[param_name]  # (..., d_in, m)
-    #     B = Bs[param_name]  # (..., m, d_out)
-    #     target_weight = get_nested_module_attr(
-    #         target_model, param_name + ".weight"
-    #     )  # (..., d_in, d_out)
-
-    #     # Make A and B have unit norm in the d_in and d_out dimensions
-    #     A.data[:] = torch.randn_like(A.data)
-    #     B.data[:] = torch.randn_like(B.data)
-    #     A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
-    #     B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
-
-    #     m_norms = einops.einsum(
-    #         A, B, target_weight, "... d_in m, ... m d_out, ... d_in d_out -> ... m"
-    #     )
-    #     # Scale B by m_norms. We leave A as is since this may get scaled with the unit_norm_matrices
-    #     # config options.
-    #     B.data[:] = B.data * m_norms.unsqueeze(-1)
 
 
 def optimize_lm(
@@ -371,7 +368,7 @@ def optimize_lm(
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 
-    init_As_and_Bs_(model=model, components=components)
+    # init_As_and_Bs_(model=model, components=components)
 
     component_params: list[torch.nn.Parameter] = []
     gate_params: list[torch.nn.Parameter] = []
@@ -470,6 +467,36 @@ def optimize_lm(
         total_loss += config.param_match_coeff * param_match_loss_val
         loss_terms["loss/parameter_matching"] = param_match_loss_val.item()
 
+        ####### masked recon loss #######
+        if config.masked_recon_coeff is not None:
+            masked_recon_loss = calc_masked_recon_loss(
+                model=model,
+                batch=batch,
+                components=components,
+                masks=masks,
+                target_out=target_out,
+                loss_type=config.output_loss_type,
+            )
+            total_loss += config.masked_recon_coeff * masked_recon_loss
+            loss_terms["loss/masked_reconstruction"] = masked_recon_loss.item()
+
+        ####### random mask recon loss #######
+        if config.random_mask_recon_coeff is not None:
+            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            random_mask_loss = torch.tensor(0.0, device=target_out.device)
+            for i in range(len(random_masks)):
+                random_mask_loss += calc_masked_recon_loss(
+                    model=model,
+                    batch=batch,
+                    components=components,
+                    masks=random_masks[i],
+                    target_out=target_out,
+                    loss_type=config.output_loss_type,
+                )
+            random_mask_loss = random_mask_loss / len(random_masks)
+            total_loss += config.random_mask_recon_coeff * random_mask_loss
+            loss_terms["loss/random_mask_reconstruction"] = random_mask_loss.item()
+
         ####### layerwise recon loss #######
         if config.layerwise_recon_coeff is not None:
             layerwise_recon_loss = calc_layerwise_recon_loss_lm(
@@ -479,6 +506,7 @@ def optimize_lm(
                 components=components,
                 masks=[masks],
                 target_out=target_out,
+                loss_type=config.output_loss_type,
             )
             total_loss += config.layerwise_recon_coeff * layerwise_recon_loss
             loss_terms["loss/layerwise_reconstruction"] = layerwise_recon_loss.item()
@@ -495,6 +523,7 @@ def optimize_lm(
                 components=components,
                 masks=layerwise_random_masks,
                 target_out=target_out,
+                loss_type=config.output_loss_type,
             )
             total_loss += config.layerwise_random_recon_coeff * layerwise_random_recon_loss
             loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
