@@ -27,7 +27,6 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
 
     # For our pretrained model, just use a randomly initialized TMS model
     tms_model_config = TMSModelConfig(
-        n_instances=2,
         n_features=5,
         n_hidden=2,
         n_hidden_layers=n_hidden_layers,
@@ -72,9 +71,9 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
         plot_results_fn=None,
     )
 
-    assert not torch.allclose(
-        initial_param, model.linear1.A
-    ), "Model A matrix should have changed after optimization"
+    assert not torch.allclose(initial_param, model.linear1.A), (
+        "Model A matrix should have changed after optimization"
+    )
 
 
 def test_tms_happy_path():
@@ -129,9 +128,9 @@ def test_train_tms_happy_path():
     final_loss = torch.mean((labels.abs() - final_out) ** 2)
 
     # Assert that the final loss is lower than the initial loss
-    assert (
-        final_loss < initial_loss
-    ), f"Final loss ({final_loss:.2e}) is not lower than initial loss ({initial_loss:.2e})"
+    assert final_loss < initial_loss, (
+        f"Final loss ({final_loss:.2e}) is not lower than initial loss ({initial_loss:.2e})"
+    )
 
 
 def test_tms_train_fixed_identity():
@@ -201,9 +200,9 @@ def test_tms_train_fixed_random():
     train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
 
     # Assert that the hidden layers are unchanged
-    assert torch.allclose(
-        model.hidden_layers[0].weight.data, initial_hidden
-    ), "Hidden layer changed"
+    assert torch.allclose(model.hidden_layers[0].weight.data, initial_hidden), (
+        "Hidden layer changed"
+    )
 
 
 def test_tms_equivalent_to_raw_model() -> None:
@@ -305,8 +304,8 @@ def test_init_tms_spd_model_from_target() -> None:
         target_out = target_model(input_data)
         spd_out = spd_model(input_data)
 
-    assert torch.allclose(
-        spd_model.linear1.weight, target_model.linear1.weight
-    ), "Weights do not match"
+    assert torch.allclose(spd_model.linear1.weight, target_model.linear1.weight), (
+        "Weights do not match"
+    )
 
     assert torch.allclose(target_out, spd_out), "Outputs after initialization do not match"

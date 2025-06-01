@@ -267,7 +267,7 @@ class ComponentModel(nn.Module):
 
         comp_model = ComponentModel(
             base_model=base_model,
-            target_module_patterns=config.task_config.target_module_patterns,
+            target_module_patterns=config.target_module_patterns,
             m=config.m,
             n_gate_hidden_neurons=config.n_gate_hidden_neurons,
             pretrained_model_output_attr=config.pretrained_model_output_attr,

@@ -48,7 +48,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
             synced_inputs: The indices of the inputs to sync.
         """
         super().__init__(
-            n_instances=1,
             n_features=n_features,
             feature_probability=feature_probability,
             device=device,
@@ -79,9 +78,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
     ) -> tuple[Float[Tensor, "batch n_functions"], Float[Tensor, "batch n_functions"]]:
         # Note that the parent_labels are just the batch itself
         batch, parent_labels = super().generate_batch(batch_size)
-        # SparseFeatureDataset returns a n_instances dimension
-        batch = batch[:, 0].contiguous()
-        parent_labels = parent_labels[:, 0].contiguous()
         labels = self.label_fn(batch) if self.label_fn is not None else parent_labels
         return batch, labels
 

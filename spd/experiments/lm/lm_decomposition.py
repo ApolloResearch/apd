@@ -343,17 +343,17 @@ def optimize_lm(
     n_eval_steps: int,
     out_dir: Path | None,
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
+    tied_weights: list[tuple[str, str]] | None = None,
 ) -> None:
     """Run the optimization loop for LM decomposition."""
 
     model = ComponentModel(
         base_model=target_model,
-        target_module_patterns=config.task_config.target_module_patterns,
+        target_module_patterns=config.target_module_patterns,
         m=config.m,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
         pretrained_model_output_attr=config.pretrained_model_output_attr,
     )
-    model.to(device)
 
     logger.info("Model loaded.")
     logger.info("Freezing target model parameters...")
@@ -368,6 +368,13 @@ def optimize_lm(
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 
+    if tied_weights is not None:
+        # Tie component weights. Assume that the first element is a transpose of the second element
+        for src_name, tgt_name in tied_weights:
+            components[tgt_name].B.data = components[src_name].A.data.T
+            components[tgt_name].A.data = components[src_name].B.data.T
+
+    model.to(device)
     # init_As_and_Bs_(model=model, components=components)
 
     component_params: list[torch.nn.Parameter] = []

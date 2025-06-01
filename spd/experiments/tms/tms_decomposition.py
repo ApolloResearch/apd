@@ -8,21 +8,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import einops
 import fire
-import matplotlib.pyplot as plt
 import torch
 import wandb
 import yaml
-from jaxtyping import Float
-from torch import Tensor
 
 from spd.configs import Config, TMSTaskConfig
-from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
+from spd.experiments.lm.lm_decomposition import optimize_lm
+from spd.experiments.resid_mlp.resid_mlp_decomposition import resid_mlp_plot_results_fn
+from spd.experiments.tms.models import TMSModel, TMSModelConfig
 from spd.log import logger
-from spd.models.components import Gate, GateMLP
-from spd.plotting import plot_AB_matrices_tms, plot_mask_vals_tms
-from spd.run_spd import get_common_run_name_suffix, optimize
+from spd.run_spd import get_common_run_name_suffix
 from spd.utils import (
     DatasetGeneratedDataLoader,
     SparseFeatureDataset,
@@ -47,28 +43,6 @@ def get_run_name(config: Config, tms_model_config: TMSModelConfig) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def make_plots(
-    model: TMSSPDModel,
-    target_model: TMSModel,
-    step: int,
-    out_dir: Path,
-    device: str,
-    config: Config,
-    gates: dict[str, Gate | GateMLP],
-    masks: dict[str, Float[Tensor, "batch n_instances m"]],
-    batch: Float[Tensor, "batch n_instances n_features"],
-    **_,
-) -> dict[str, plt.Figure]:
-    plots = {}
-    plots["masks"], all_perm_indices = plot_mask_vals_tms(
-        model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
-    )
-    plots["AB_matrices"] = plot_AB_matrices_tms(
-        model=model, device=device, all_perm_indices=all_perm_indices
-    )
-    return plots
-
-
 def save_target_model_info(
     save_to_wandb: bool,
     out_dir: Path,
@@ -83,20 +57,6 @@ def save_target_model_info(
     if save_to_wandb:
         wandb.save(str(out_dir / "tms.pth"), base_path=out_dir, policy="now")
         wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir, policy="now")
-
-
-def init_spd_model_from_target_model(model: TMSSPDModel, target_model: TMSModel, m: int) -> None:
-    assert target_model.config.n_hidden_layers == 0, "Hidden layers not supported for now"
-    assert m == target_model.config.n_features, "m must be equal to n_features"
-    # We set the A to the identity and B to the target weight matrix
-    model.linear1.A.data[:] = einops.repeat(
-        torch.eye(m),
-        "d_in m -> n_instances d_in m",
-        n_instances=target_model.config.n_instances,
-    )
-    # The B matrix is just the target model's linear layer
-    model.linear1.B.data[:] = target_model.linear1.weight.data.clone()
-    logger.info("Initialized SPD model from target model")
 
 
 def main(
@@ -141,28 +101,8 @@ def main(
         tms_model_train_config_dict=target_model_train_config_dict,
     )
 
-    tms_spd_model_config = TMSSPDModelConfig(
-        **target_model.config.model_dump(mode="json"),
-        m=config.m,
-        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
-    )
-    model = TMSSPDModel(config=tms_spd_model_config)
-
-    if config.init_from_target_model:
-        init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
-
-    # Manually set the bias for the SPD model from the bias in the pretrained model
-    model.b_final.data[:] = target_model.b_final.data.clone()
-    model.b_final.requires_grad = False
-
-    param_names = ["linear1", "linear2"]
-    if model.hidden_layers is not None:
-        for i in range(len(model.hidden_layers)):
-            param_names.append(f"hidden_layers.{i}")
-
     synced_inputs = target_model_train_config_dict.get("synced_inputs", None)
     dataset = SparseFeatureDataset(
-        n_instances=target_model.config.n_instances,
         n_features=target_model.config.n_features,
         feature_probability=task_config.feature_probability,
         device=device,
@@ -170,17 +110,23 @@ def main(
         value_range=(0.0, 1.0),
         synced_inputs=synced_inputs,
     )
-    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
+    train_loader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    eval_loader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    optimize(
-        model=model,
+    tied_weights = None
+    if target_model.config.tied_weights:
+        tied_weights = [("linear1", "linear2")]
+
+    optimize_lm(
+        target_model=target_model,
         config=config,
         device=device,
-        dataloader=dataloader,
-        target_model=target_model,
-        param_names=param_names,
+        train_loader=train_loader,
+        eval_loader=eval_loader,
+        n_eval_steps=config.n_eval_steps,
         out_dir=out_dir,
-        plot_results_fn=make_plots,
+        plot_results_fn=resid_mlp_plot_results_fn,
+        tied_weights=tied_weights,
     )
 
     if config.wandb_project:

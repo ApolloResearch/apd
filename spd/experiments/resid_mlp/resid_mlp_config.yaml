@@ -12,6 +12,11 @@ random_mask_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
+target_module_patterns:
+  - "layers.*.mlp_in"
+  - "layers.*.mlp_out"
+
+
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
 output_loss_type: mse
@@ -34,9 +39,7 @@ task_config:
   task_name: residual_mlp
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
-  target_module_patterns:
-    - "layers.*.mlp_in"
-    - "layers.*.mlp_out"
+
   # pretrained_model_path: wandb:spd-train-resid-mlp/runs/44nbrrue # 1 layer
   # pretrained_model_path: wandb:spd-train-resid-mlp/runs/44nbrrue # 1 layer
   pretrained_model_path: wandb:spd-train-resid-mlp/runs/zas5yjdl # 1 layer # Lucius run from slack

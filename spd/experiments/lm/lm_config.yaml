@@ -11,6 +11,16 @@ m: 100 # Rank of the decomposition / number of components per layer
 n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
 n_gate_hidden_neurons: null
 init_from_target_model: false # Not implemented/applicable for this setup
+# List of fnmatch patterns for nn.Linear modules to decompose
+# target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
+# target_module_patterns: ["model.embed_tokens"]
+target_module_patterns: ["model.embed_tokens"]
+# target_module_patterns: ["transformer.wte"]
+# target_module_patterns: ["transformer.h.3.mlp.c_fc"]
+# Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
+# Example: Decompose only the token embedding: ["transformer.wte"]
+# Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
+# Example: Decompose all MLP layers: ["transformer.h.*.mlp.*_proj"] 
 
 # --- Loss Coefficients ---
 out_recon_coeff: null
@@ -65,16 +75,7 @@ task_config:
   train_data_split: "train" # Dataset split to use
   eval_data_split: "test" # Dataset split to use
   # eval_data_split: "validation" # Dataset split to use
-  # List of fnmatch patterns for nn.Linear modules to decompose
-  # target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
-  # target_module_patterns: ["model.embed_tokens"]
-  target_module_patterns: ["model.embed_tokens"]
-  # target_module_patterns: ["transformer.wte"]
-  # target_module_patterns: ["transformer.h.3.mlp.c_fc"]
-  # Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
-  # Example: Decompose only the token embedding: ["transformer.wte"]
-  # Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
-  # Example: Decompose all MLP layers: ["transformer.h.*.mlp.*_proj"] 
+
 
 # Config details for the target model taken from https://github.com/danbraunai/simple_stories_train/blob/main/simple_stories_train/models/model_configs.py#L54
   # "1.25M": LlamaConfig(

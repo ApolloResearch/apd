@@ -19,7 +19,7 @@ from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
 from spd.models.components import Gate, GateMLP, Linear, LinearComponent
 from spd.module_utils import collect_nested_module_attrs, get_nested_module_attr
-from spd.utils import calc_recon_mse, get_lr_schedule_fn, get_lr_with_warmup
+from spd.utils import get_lr_schedule_fn, get_lr_with_warmup
 
 
 def get_common_run_name_suffix(config: Config) -> str:
@@ -211,7 +211,7 @@ def calc_random_masks_mse_loss(
     loss = torch.tensor(0.0, device=out_masked.device)
     for i in range(len(random_masks)):
         out_masked_random_mask = model(batch, masks=random_masks[i])
-        loss = loss + calc_recon_mse(out_masked, out_masked_random_mask, has_instance_dim)
+        loss = loss + (out_masked - out_masked_random_mask).pow(2).mean()
 
     return loss / len(random_masks)
 

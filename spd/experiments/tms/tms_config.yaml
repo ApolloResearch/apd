@@ -30,29 +30,35 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
-m: 100
+m: 200
 param_match_coeff: 1.0
-masked_recon_coeff: 1.0
-pnorm: 0.9
+masked_recon_coeff: null
+pnorm: 2.0
 lp_sparsity_coeff: 1e-4
 random_mask_recon_coeff: 1
-n_random_masks: 1
-# n_gate_hidden_neurons: 8
-n_gate_hidden_neurons: null
-layerwise_recon_coeff: 1.0
+layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
+n_random_masks: 1
+n_gate_hidden_neurons: 16
+# n_gate_hidden_neurons: null
+target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
+
 batch_size: 2048
-steps: 30_000
+steps: 20_000
 image_freq: 5_000
 print_freq: 1000
-save_freq: 20_000
+save_freq: null
 lr: 1e-3
 lr_schedule: constant
-lr_warmup_pct: 0.05
+lr_warmup_pct: 0.0
 init_from_target_model: false
+n_eval_steps: 100
+
+
 task_config:
   task_name: tms
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
   # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
   pretrained_model_path: "wandb:spd-train-tms/runs/me2x5oeo" # 1 hidden layer fixed to identity
+  # pretrained_model_path: "wandb:spd-train-tms/runs/e90lfi1j" # 1 hidden layer fixed to identity

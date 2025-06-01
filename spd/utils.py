@@ -157,14 +157,13 @@ DataGenerationType = Literal[
 class SparseFeatureDataset(
     Dataset[
         tuple[
-            Float[Tensor, "batch n_instances n_features"],
-            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_features"],
+            Float[Tensor, "batch n_features"],
         ]
     ]
 ):
     def __init__(
         self,
-        n_instances: int,
         n_features: int,
         feature_probability: float,
         device: str,
@@ -172,7 +171,6 @@ class SparseFeatureDataset(
         value_range: tuple[float, float] = (0.0, 1.0),
         synced_inputs: list[list[int]] | None = None,
     ):
-        self.n_instances = n_instances
         self.n_features = n_features
         self.feature_probability = feature_probability
         self.device = device
@@ -184,8 +182,8 @@ class SparseFeatureDataset(
         return 2**31
 
     def sync_inputs(
-        self, batch: Float[Tensor, "batch n_instances n_features"]
-    ) -> Float[Tensor, "batch n_instances n_features"]:
+        self, batch: Float[Tensor, "batch n_features"]
+    ) -> Float[Tensor, "batch n_features"]:
         assert self.synced_inputs is not None
         all_indices = [item for sublist in self.synced_inputs for item in sublist]
         assert len(all_indices) == len(set(all_indices)), "Synced inputs must be non-overlapping"
@@ -197,18 +195,14 @@ class SparseFeatureDataset(
                 mask[..., idx] = non_zero_samples
             # Now generate random values in value_range and apply them to the masked elements
             max_val, min_val = self.value_range
-            random_values = torch.rand(
-                batch.shape[0], self.n_instances, self.n_features, device=self.device
-            )
+            random_values = torch.rand(batch.shape[0], self.n_features, device=self.device)
             random_values = random_values * (max_val - min_val) + min_val
             batch = torch.where(mask, random_values, batch)
         return batch
 
     def generate_batch(
         self, batch_size: int
-    ) -> tuple[
-        Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances n_features"]
-    ]:
+    ) -> tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch n_features"]]:
         # TODO: This is a hack to keep backward compatibility. Probably best to have
         # data_generation_type: Literal["exactly_n_active", "at_least_zero_active"] and
         # data_generation_n: PositiveInt
@@ -223,7 +217,7 @@ class SparseFeatureDataset(
             n = number_map[self.data_generation_type]
             batch = self._generate_n_feature_active_batch(batch_size, n=n)
         elif self.data_generation_type == "at_least_zero_active":
-            batch = self._generate_multi_feature_batch(batch_size)
+            batch = self._masked_batch_generator(batch_size)
             if self.synced_inputs is not None:
                 batch = self.sync_inputs(batch)
         else:
@@ -245,12 +239,12 @@ class SparseFeatureDataset(
                 f"Cannot activate {n} features when only {self.n_features} features exist"
             )
 
-        batch = torch.zeros(batch_size, self.n_instances, self.n_features, device=self.device)
+        batch = torch.zeros(batch_size, self.n_features, device=self.device)
 
         # Create indices for all features
         feature_indices = torch.arange(self.n_features, device=self.device)
-        # Expand to batch size and n_instances
-        feature_indices = feature_indices.expand(batch_size, self.n_instances, self.n_features)
+        # Expand to batch size
+        feature_indices = feature_indices.expand(batch_size, self.n_features)
 
         # For each instance in the batch, randomly permute the features
         perm = torch.rand_like(feature_indices.float()).argsort(dim=-1)
@@ -261,7 +255,7 @@ class SparseFeatureDataset(
 
         # Generate random values in value_range for the active features
         min_val, max_val = self.value_range
-        random_values = torch.rand(batch_size, self.n_instances, n, device=self.device)
+        random_values = torch.rand(batch_size, n, device=self.device)
         random_values = random_values * (max_val - min_val) + min_val
 
         # Place each active feature
@@ -291,19 +285,6 @@ class SparseFeatureDataset(
         mask = torch.rand_like(batch) < self.feature_probability
         return batch * mask
 
-    def _generate_multi_feature_batch(
-        self, batch_size: int
-    ) -> Float[Tensor, "batch n_instances n_features"]:
-        """Generate a batch where each feature activates independently with probability
-        `feature_probability`."""
-        total_batch_size = batch_size * self.n_instances
-        batch = self._masked_batch_generator(total_batch_size)
-        return einops.rearrange(
-            batch,
-            "(batch n_instances) n_features -> batch n_instances n_features",
-            batch=batch_size,
-        )
-
     def _generate_multi_feature_batch_no_zero_samples(
         self, batch_size: int, buffer_ratio: float
     ) -> Float[Tensor, "batch n_instances n_features"]:
@@ -319,75 +300,39 @@ class SparseFeatureDataset(
                 n_zeros` samples and fill in the zero samples. Continue until there are no zero
                 samples.
         """
-        total_batch_size = batch_size * self.n_instances
-        buffer_size = int(total_batch_size * buffer_ratio)
+        buffer_size = int(batch_size * buffer_ratio)
         batch = torch.empty(0, device=self.device, dtype=torch.float32)
-        n_samples_needed = total_batch_size
+        n_samples_needed = batch_size
         while True:
             buffer = self._masked_batch_generator(buffer_size)
             # Get the indices of the non-zero samples in the buffer
             valid_indices = buffer.sum(dim=-1) != 0
             batch = torch.cat((batch, buffer[valid_indices][:n_samples_needed]))
-            if len(batch) == total_batch_size:
+            if len(batch) == batch_size:
                 break
             else:
                 # We don't have enough valid samples
-                n_samples_needed = total_batch_size - len(batch)
+                n_samples_needed = batch_size - len(batch)
                 buffer_size = int(n_samples_needed * buffer_ratio)
-        return einops.rearrange(
-            batch,
-            "(batch n_instances) n_features -> batch n_instances n_features",
-            batch=batch_size,
-        )
+        return batch
 
 
 def compute_feature_importances(
     batch_size: int,
-    n_instances: int | None,
     n_features: int,
     importance_val: float | None,
     device: str,
-) -> Float[Tensor, "batch_size n_instances n_features"]:
+) -> Float[Tensor, "batch_size n_features"]:
     # Defines a tensor where the i^th feature has importance importance^i
     if importance_val is None or importance_val == 1.0:
-        shape = (
-            (batch_size, n_instances, n_features)
-            if n_instances is not None
-            else (batch_size, n_features)
-        )
-        importance_tensor = torch.ones(shape, device=device)
+        importance_tensor = torch.ones(batch_size, n_features, device=device)
     else:
         powers = torch.arange(n_features, device=device)
         importances = torch.pow(importance_val, powers)
-        if n_instances is not None:
-            # Now make it a tensor of shape (batch_size, n_instances, n_features)
-            importance_tensor = einops.repeat(
-                importances,
-                "n_features -> batch_size n_instances n_features",
-                batch_size=batch_size,
-                n_instances=n_instances,
-            )
-        else:
-            importance_tensor = einops.repeat(
-                importances, "n_features -> batch_size n_features", batch_size=batch_size
-            )
+        importance_tensor = einops.repeat(
+            importances, "n_features -> batch_size n_features", batch_size=batch_size
+        )
     return importance_tensor
-
-
-def calc_recon_mse(
-    output: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
-    labels: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
-    has_instance_dim: bool = False,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    recon_loss = (output - labels) ** 2
-    if recon_loss.ndim == 3:
-        assert has_instance_dim
-        recon_loss = einops.reduce(recon_loss, "b i f -> i", "mean")
-    elif recon_loss.ndim == 2:
-        recon_loss = recon_loss.mean()
-    else:
-        raise ValueError(f"Expected 2 or 3 dims in recon_loss, got {recon_loss.ndim}")
-    return recon_loss
 
 
 def get_lr_schedule_fn(

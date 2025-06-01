@@ -88,7 +88,7 @@ def train(
             batch, labels = next(data_iter)
             out = model(batch)
             error = importance * (labels.abs() - out) ** 2
-            loss = einops.reduce(error, "b i f -> i", "mean").sum()
+            loss = error.mean()
             loss.backward()
             opt.step()
 
@@ -99,15 +99,13 @@ def train(
                 for h in hooks:
                     h(hook_data)
             if step % print_freq == 0 or (step + 1 == steps):
-                tqdm.write(f"Step {step} Loss: {loss.item() / model.config.n_instances}")
+                tqdm.write(f"Step {step} Loss: {loss.item()}")
                 t.set_postfix(
-                    loss=loss.item() / model.config.n_instances,
+                    loss=loss.item(),
                     lr=step_lr,
                 )
                 if log_wandb:
-                    wandb.log(
-                        {"loss": loss.item() / model.config.n_instances, "lr": step_lr}, step=step
-                    )
+                    wandb.log({"loss": loss.item(), "lr": step_lr}, step=step)
 
 
 def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
@@ -117,28 +115,26 @@ def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
     WA = model.linear1.weight.detach()
-    sel = range(model.config.n_instances)  # can be used to highlight specific sparsity levels
     color = plt.cm.viridis(np.array([0.0]))  # type: ignore
     plt.rcParams["figure.dpi"] = 200
-    fig, axs = plt.subplots(1, len(sel), figsize=(2 * len(sel), 2))
-    axs = np.array(axs)
-    for i, ax in zip(sel, axs, strict=False):
-        W = WA[i].cpu().detach().numpy()
-        ax.scatter(W[:, 0], W[:, 1], c=color)
-        ax.set_aspect("equal")
-        ax.add_collection(
-            mc.LineCollection(np.stack((np.zeros_like(W), W), axis=1), colors=[color])  # type: ignore
-        )
+    fig, ax = plt.subplots(1, 1, figsize=(2, 2))
 
-        z = 1.5
-        ax.set_facecolor("#FCFBF8")
-        ax.set_xlim((-z, z))
-        ax.set_ylim((-z, z))
-        ax.tick_params(left=True, right=False, labelleft=False, labelbottom=False, bottom=True)
-        for spine in ["top", "right"]:
-            ax.spines[spine].set_visible(False)
-        for spine in ["bottom", "left"]:
-            ax.spines[spine].set_position("center")
+    W = WA.cpu().detach().numpy()
+    ax.scatter(W[:, 0], W[:, 1], c=color)
+    ax.set_aspect("equal")
+    ax.add_collection(
+        mc.LineCollection(np.stack((np.zeros_like(W), W), axis=1), colors=[color])  # type: ignore
+    )
+
+    z = 1.5
+    ax.set_facecolor("#FCFBF8")
+    ax.set_xlim((-z, z))
+    ax.set_ylim((-z, z))
+    ax.tick_params(left=True, right=False, labelleft=False, labelbottom=False, bottom=True)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    for spine in ["bottom", "left"]:
+        ax.spines[spine].set_position("center")
     plt.savefig(filepath)
 
 
@@ -146,7 +142,7 @@ def plot_cosine_similarity_distribution(
     model: TMSModel,
     filepath: Path,
 ) -> None:
-    """Create scatter plots of cosine similarities between feature vectors for each instance.
+    """Create scatter plot of cosine similarities between feature vectors.
 
     Args:
         model: The trained TMS model
@@ -155,22 +151,17 @@ def plot_cosine_similarity_distribution(
     # Calculate cosine similarities
     rows = model.linear1.weight.detach()
     rows /= rows.norm(dim=-1, keepdim=True)
-    cosine_sims = einops.einsum(rows, rows, "i f1 h, i f2 h -> i f1 f2")
-    mask = ~torch.eye(rows.shape[1], device=rows.device, dtype=torch.bool)
-    masked_sims = cosine_sims[:, mask].reshape(rows.shape[0], -1)
+    cosine_sims = einops.einsum(rows, rows, "f1 h, f2 h -> f1 f2")
+    mask = ~torch.eye(rows.shape[0], device=rows.device, dtype=torch.bool)
+    masked_sims = cosine_sims[mask]
 
-    # Create subplot for each instance
-    fig, axs = plt.subplots(1, model.config.n_instances, figsize=(4 * model.config.n_instances, 4))
-    axs = np.array(axs).flatten()  # Handle case where n_instances = 1
+    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
 
-    for i, ax in enumerate(axs):
-        sims = masked_sims[i].cpu().numpy()
-        ax.scatter(sims, np.zeros_like(sims), alpha=0.5)
-        ax.set_title(f"Instance {i}")
-        ax.set_xlim(-1, 1)
-        if i == 0:  # Only show x-label for first plot
-            ax.set_xlabel("Cosine Similarity")
-        ax.set_yticks([])  # Hide y-axis ticks
+    sims = masked_sims.cpu().numpy()
+    ax.scatter(sims, np.zeros_like(sims), alpha=0.5)
+    ax.set_xlim(-1, 1)
+    ax.set_xlabel("Cosine Similarity")
+    ax.set_yticks([])  # Hide y-axis ticks
 
     plt.tight_layout()
     plt.savefig(filepath)
@@ -197,7 +188,6 @@ def get_model_and_dataloader(
             model.hidden_layers[i].weight.requires_grad = False
 
     dataset = SparseFeatureDataset(
-        n_instances=config.tms_model_config.n_instances,
         n_features=config.tms_model_config.n_features,
         feature_probability=config.feature_probability,
         device=device,
@@ -215,7 +205,7 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     model_cfg = config.tms_model_config
     run_name = (
         f"tms_n-features{model_cfg.n_features}_n-hidden{model_cfg.n_hidden}_"
-        f"n-hidden-layers{model_cfg.n_hidden_layers}_n-instances{model_cfg.n_instances}_"
+        f"n-hidden-layers{model_cfg.n_hidden_layers}_"
         f"feat_prob{config.feature_probability}_seed{config.seed}"
     )
     if config.fixed_identity_hidden_layers:
@@ -272,7 +262,6 @@ if __name__ == "__main__":
     #         n_features=5,
     #         n_hidden=2,
     #         n_hidden_layers=0,
-    #         n_instances=12,
     #         device=device,
     #     ),
     #     feature_probability=0.05,
@@ -290,8 +279,8 @@ if __name__ == "__main__":
         tms_model_config=TMSModelConfig(
             n_features=40,
             n_hidden=10,
-            n_hidden_layers=0,
-            n_instances=3,
+            n_hidden_layers=1,
+            tied_weights=True,
             device=device,
         ),
         feature_probability=0.05,

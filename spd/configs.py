@@ -36,7 +36,6 @@ class ResidualMLPTaskConfig(BaseModel):
     pretrained_model_path: ModelPath  # e.g. wandb:spd-resid-mlp/runs/j9kmavzi
     # TODO: Move to main config when supported by TMS
     # List of fnmatch patterns for nn.Linear modules to decompose
-    target_module_patterns: list[str] = ["mlp.mlp_in", "mlp.mlp_out"]
 
 
 class LMTaskConfig(BaseModel):
@@ -66,7 +65,7 @@ class Config(BaseModel):
     n_random_masks: PositiveInt
     n_gate_hidden_neurons: PositiveInt | None = None
     init_from_target_model: bool = False
-    target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
+    target_module_patterns: list[str]
 
     # --- Loss Coefficients
     out_recon_coeff: NonNegativeFloat | None = None
@@ -90,7 +89,7 @@ class Config(BaseModel):
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
-    n_eval_steps: PositiveInt | None = None  # TODO: Remove the None when TMS supports this
+    n_eval_steps: PositiveInt
 
     # --- Logging & Saving ---
     image_freq: PositiveInt | None = None
