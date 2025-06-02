@@ -7,7 +7,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from spd.models.component_model import ComponentModel
-from spd.models.components import EmbeddingComponent, LinearComponentWithBias
+from spd.models.components import EmbeddingComponent, LinearComponent
 from spd.utils import calc_kl_divergence_lm
 
 
@@ -61,7 +61,7 @@ def calc_embedding_recon_loss(
 def calc_schatten_loss(
     relud_masks: dict[str, Float[Tensor, "... m"]],
     pnorm: float,
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     device: str,
 ) -> Float[Tensor, ""]:
     """Calculate the Schatten loss on the active components.
@@ -122,7 +122,7 @@ def calc_layerwise_recon_loss(
     model: ComponentModel,
     batch: Int[Tensor, "..."],
     device: str,
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     masks: list[dict[str, Float[Tensor, "... m"]]],
     target_out: Float[Tensor, "... d_model_out"],
     loss_type: Literal["mse", "kl"] = "kl",
@@ -152,7 +152,7 @@ def calc_layerwise_recon_loss(
 def calc_masked_recon_loss(
     model: ComponentModel,
     batch: Float[Tensor, "... d_in"],
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     masks: dict[str, Float[Tensor, "... m"]],
     target_out: Float[Tensor, "... d_mdoel_out"],
     loss_type: Literal["mse", "kl"] = "mse",
@@ -194,7 +194,7 @@ def _calc_param_mse(
 
 
 def calc_param_match_loss(
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     target_model: nn.Module,
     n_params: int,
     device: str,

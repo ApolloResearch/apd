@@ -17,9 +17,10 @@ from matplotlib import collections as mc
 from pydantic import BaseModel, ConfigDict, PositiveInt, model_validator
 from tqdm import tqdm, trange
 
+from spd.data_utils import DatasetGeneratedDataLoader, SparseFeatureDataset
 from spd.experiments.tms.models import TMSModel, TMSModelConfig
 from spd.log import logger
-from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
+from spd.utils import set_seed
 
 wandb.require("core")
 
@@ -256,45 +257,45 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # TMS 5-2
+    config = TMSTrainConfig(
+        wandb_project="spd-train-tms",
+        tms_model_config=TMSModelConfig(
+            n_features=5,
+            n_hidden=2,
+            n_hidden_layers=1,
+            tied_weights=True,
+            device=device,
+        ),
+        feature_probability=0.05,
+        batch_size=1024,
+        steps=5000,
+        seed=0,
+        lr=5e-3,
+        data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=True,
+        fixed_random_hidden_layers=False,
+    )
+    # TMS 40-10
     # config = TMSTrainConfig(
-    #     wandb_project="spd-train-tms",
+    #     # wandb_project="spd-train-tms",
     #     tms_model_config=TMSModelConfig(
-    #         n_features=5,
-    #         n_hidden=2,
+    #         n_features=40,
+    #         n_hidden=10,
     #         n_hidden_layers=0,
     #         tied_weights=True,
     #         device=device,
     #     ),
     #     feature_probability=0.05,
-    #     batch_size=1024,
-    #     steps=5000,
+    #     # feature_probability=0.02, # synced inputs
+    #     batch_size=2048,
+    #     steps=4000,
     #     seed=0,
-    #     lr=5e-3,
+    #     lr=1e-3,
     #     data_generation_type="at_least_zero_active",
     #     fixed_identity_hidden_layers=False,
     #     fixed_random_hidden_layers=False,
+    #     # synced_inputs=[[5, 6], [0, 2, 3]],
     # )
-    # TMS 40-10
-    config = TMSTrainConfig(
-        # wandb_project="spd-train-tms",
-        tms_model_config=TMSModelConfig(
-            n_features=5,
-            n_hidden=2,
-            n_hidden_layers=0,
-            tied_weights=True,
-            device=device,
-        ),
-        feature_probability=0.05,
-        # feature_probability=0.02, # synced inputs
-        batch_size=2048,
-        steps=4000,
-        seed=0,
-        lr=1e-3,
-        data_generation_type="at_least_zero_active",
-        fixed_identity_hidden_layers=False,
-        fixed_random_hidden_layers=False,
-        # synced_inputs=[[5, 6], [0, 2, 3]],
-    )
     set_seed(config.seed)
 
     run_train(config, device)

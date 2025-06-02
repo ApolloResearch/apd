@@ -24,7 +24,7 @@ from spd.models.components import (
     EmbeddingComponent,
     Gate,
     GateMLP,
-    LinearComponentWithBias,
+    LinearComponent,
 )
 from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
@@ -99,7 +99,7 @@ def plot_subnetwork_attributions(
 
 def resid_mlp_plot_results_fn(
     model: ComponentModel,
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     gates: dict[str, Gate | GateMLP],
     batch_shape: tuple[int, ...],
     device: str,

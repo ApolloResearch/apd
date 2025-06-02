@@ -21,64 +21,42 @@ def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
 class Gate(nn.Module):
     """A gate that maps a single input to a single output."""
 
-    def __init__(self, m: int, n_instances: int | None = None):
+    def __init__(self, m: int):
         super().__init__()
-        self.n_instances = n_instances
-        shape = (n_instances, m) if n_instances is not None else (m,)
-        self.weight = nn.Parameter(torch.empty(shape))
-        self.bias = nn.Parameter(torch.zeros(shape))
+        self.weight = nn.Parameter(torch.empty((m,)))
+        self.bias = nn.Parameter(torch.zeros((m,)))
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
 
-    def forward(
-        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+    def forward(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
         return leaky_relu(torch.clamp(x * self.weight + self.bias, max=1))
 
-    def forward_unclamped(
-        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+    def forward_unclamped(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
         return upper_leaky_relu(x * self.weight + self.bias)
 
 
 class GateMLP(nn.Module):
     """A gate with a hidden layer that maps a single input to a single output."""
 
-    def __init__(self, m: int, n_gate_hidden_neurons: int, n_instances: int | None = None):
+    def __init__(self, m: int, n_gate_hidden_neurons: int):
         super().__init__()
-        self.n_instances = n_instances
         self.n_gate_hidden_neurons = n_gate_hidden_neurons
 
-        # Define weight shapes based on instances
-        shape = (
-            (n_instances, m, n_gate_hidden_neurons)
-            if n_instances is not None
-            else (m, n_gate_hidden_neurons)
-        )
-        in_bias_shape = (
-            (n_instances, m, n_gate_hidden_neurons)
-            if n_instances is not None
-            else (m, n_gate_hidden_neurons)
-        )
-        out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
-
-        self.mlp_in = nn.Parameter(torch.empty(shape))
-        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
-        self.mlp_out = nn.Parameter(torch.empty(shape))
-        self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
+        self.mlp_in = nn.Parameter(torch.empty((m, n_gate_hidden_neurons)))
+        self.in_bias = nn.Parameter(torch.zeros((m, n_gate_hidden_neurons)))
+        self.mlp_out = nn.Parameter(torch.empty((m, n_gate_hidden_neurons)))
+        self.out_bias = nn.Parameter(torch.zeros((m,)))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
-    def _compute_pre_activation(
-        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+    def _compute_pre_activation(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
         """Compute the output before applying the final activation function."""
         # First layer with gelu activation
         hidden = einops.einsum(
             x,
             self.mlp_in,
-            "batch ... m, ... m n_gate_hidden_neurons -> batch ... m n_gate_hidden_neurons",
+            "... m, m n_gate_hidden_neurons -> ... m n_gate_hidden_neurons",
         )
         hidden = hidden + self.in_bias
         hidden = F.gelu(hidden)
@@ -87,21 +65,17 @@ class GateMLP(nn.Module):
         out = einops.einsum(
             hidden,
             self.mlp_out,
-            "batch ... m n_gate_hidden_neurons, ... m n_gate_hidden_neurons -> batch ... m",
+            "... m n_gate_hidden_neurons, m n_gate_hidden_neurons -> ... m",
         )
         out = out + self.out_bias
         return out
 
     @torch.compile
-    def forward(
-        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+    def forward(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
         return leaky_relu(torch.clamp(self._compute_pre_activation(x), max=1))
 
     @torch.compile
-    def forward_unclamped(
-        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+    def forward_unclamped(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
         return upper_leaky_relu(self._compute_pre_activation(x))
 
 
@@ -111,27 +85,26 @@ class LinearComponent(nn.Module):
     The weight matrix W is decomposed as W = A @ B, where A and B are learned parameters.
     """
 
-    def __init__(self, d_in: int, d_out: int, m: int):
+    def __init__(self, d_in: int, d_out: int, m: int, bias: Tensor | None):
         super().__init__()
         self.m = m
 
-        # Initialize A and B matrices
         self.A = nn.Parameter(torch.empty(d_in, m))
         self.B = nn.Parameter(torch.empty(m, d_out))
+        self.bias = bias
 
-        # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
         init_param_(self.A, fan_val=d_out, nonlinearity="linear")
         init_param_(self.B, fan_val=m, nonlinearity="linear")
 
+        self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
+
     @property
-    def weight(self) -> Float[Tensor, "... d_in d_out"]:
+    def weight(self) -> Float[Tensor, "d_in d_out"]:
         """A @ B"""
-        return einops.einsum(self.A, self.B, "... d_in m, ... m d_out -> ... d_in d_out")
+        return einops.einsum(self.A, self.B, "d_in m, m d_out -> d_in d_out")
 
     @torch.compile
-    def forward(
-        self, x: Float[Tensor, "batch ... d_in"], mask: Float[Tensor, "batch ... m"] | None = None
-    ) -> Float[Tensor, "batch ... d_out"]:
+    def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         """Forward pass through A and B matrices.
 
         Args:
@@ -140,53 +113,17 @@ class LinearComponent(nn.Module):
         Returns:
             output: The summed output across all components
         """
-        component_acts = einops.einsum(x, self.A, "batch ... d_in, ... d_in m -> batch ... m")
+        component_acts = einops.einsum(x, self.A, "... d_in, d_in m -> ... m")
 
-        if mask is not None:
-            component_acts *= mask
+        if self.mask is not None:
+            component_acts *= self.mask
 
-        out = einops.einsum(component_acts, self.B, "batch ... m, ... m d_out -> batch ... d_out")
+        out = einops.einsum(component_acts, self.B, "... m, m d_out -> ... d_out")
 
-        return out
-
-
-class LinearComponentWithBias(nn.Module):
-    """A LinearComponent with a bias parameter."""
-
-    def __init__(self, linear_component: LinearComponent, bias: Tensor | None):
-        super().__init__()
-        self.linear_component = linear_component
-        self.bias = bias
-        self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
-        self.A = linear_component.A
-        self.B = linear_component.B
-
-    @property
-    def weight(self) -> Float[Tensor, "... d_in d_out"]:
-        return self.linear_component.weight
-
-    def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
-        # Note: We assume bias is added *after* the component multiplication
-        # Also assume input is (batch, seq_len, d_in)
-        out = self.linear_component(x, mask=self.mask)
         if self.bias is not None:
             out += self.bias
+
         return out
-
-
-def linear_module_to_component(
-    linear_module: nn.Linear,
-    m: int,
-) -> LinearComponentWithBias:
-    """Convert an nn.Linear into a LinearComponentWithBias."""
-    d_out, d_in = linear_module.weight.shape
-    linear_component = LinearComponent(d_in=d_in, d_out=d_out, m=m)
-    # # Initialize with A = W (original weights) and B = I (identity)
-    # # This provides a starting point where the component exactly equals the original
-    # linear_component.A.data[:] = linear_module.weight.t()  # (d_in, m)
-    # linear_component.B.data[:] = torch.eye(m)
-    bias = linear_module.bias if linear_module.bias is not None else None  # type: ignore
-    return LinearComponentWithBias(linear_component, bias)
 
 
 class EmbeddingComponent(nn.Module):
@@ -201,11 +138,8 @@ class EmbeddingComponent(nn.Module):
         super().__init__()
         self.m = m
 
-        # Initialize A and B matrices
-        shape_A = (vocab_size, m)
-        shape_B = (m, embedding_dim)
-        self.A = nn.Parameter(torch.empty(shape_A))
-        self.B = nn.Parameter(torch.empty(shape_B))
+        self.A = nn.Parameter(torch.empty(vocab_size, m))
+        self.B = nn.Parameter(torch.empty(m, embedding_dim))
 
         # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
         init_param_(self.A, fan_val=embedding_dim, nonlinearity="linear")

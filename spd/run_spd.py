@@ -33,7 +33,7 @@ from spd.models.component_utils import (
     calc_random_masks,
     component_activation_statistics,
 )
-from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponentWithBias
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.plotting import (
     create_embed_mask_sample_table,
     plot_mean_component_activation_counts,
@@ -94,7 +94,7 @@ def optimize(
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
     }  # type: ignore
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
+    components: dict[str, LinearComponent | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 

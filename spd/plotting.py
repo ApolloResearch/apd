@@ -18,7 +18,7 @@ from spd.models.components import (
     EmbeddingComponent,
     Gate,
     GateMLP,
-    LinearComponentWithBias,
+    LinearComponent,
 )
 
 
@@ -71,7 +71,7 @@ def permute_to_identity(
 
 def plot_mask_vals(
     model: ComponentModel,
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     gates: dict[str, Gate | GateMLP],
     batch_shape: tuple[int, ...],
     device: str,
@@ -226,7 +226,7 @@ def plot_matrix(
 
 
 def plot_AB_matrices(
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    components: dict[str, LinearComponent | EmbeddingComponent],
     all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
 ) -> plt.Figure:
     """Plot A and B matrices for each instance, grouped by layer."""

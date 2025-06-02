@@ -4,11 +4,8 @@
 import torch
 from transformers import AutoTokenizer, LlamaForCausalLM
 
-from spd.experiments.lm.models import (
-    EmbeddingComponent,
-)
 from spd.models.component_model import ComponentModel
-from spd.models.components import LinearComponentWithBias
+from spd.models.components import EmbeddingComponent, LinearComponent
 
 # %%
 print("Loading base language model ...")
@@ -45,7 +42,7 @@ comp_model = ComponentModel(
 # gate_proj_components = create_target_components(
 #     model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
 # )
-gate_proj_components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
+gate_proj_components: dict[str, LinearComponent | EmbeddingComponent] = {
     k.removeprefix("components.").replace("-", "."): v for k, v in comp_model.components.items()
 }  # type: ignore
 # %%
@@ -87,7 +84,7 @@ print("inputs_shape", input_ids.shape)
 print("logits", logits)
 print("logits shape", logits.shape)
 
-logits = comp_model.forward_with_components(input_ids, components=gate_proj_components).logits
+logits = comp_model.forward_with_components(input_ids, components=gate_proj_components)
 
 print("Component logits shape", logits.shape)
 print("Component logits", logits)
@@ -98,9 +95,7 @@ masks = {
     for i in range(len(model.model.layers))
 }
 
-logits = comp_model.forward_with_components(
-    input_ids, components=gate_proj_components, masks=masks
-).logits
+logits = comp_model.forward_with_components(input_ids, components=gate_proj_components, masks=masks)
 
 print("Masked component logits shape", logits.shape)
 print("Masked component logits", logits)

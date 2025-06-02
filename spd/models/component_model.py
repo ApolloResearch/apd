@@ -17,8 +17,7 @@ from spd.models.components import (
     EmbeddingComponent,
     Gate,
     GateMLP,
-    LinearComponentWithBias,
-    linear_module_to_component,
+    LinearComponent,
 )
 from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import load_pretrained
@@ -66,13 +65,16 @@ class ComponentModel(nn.Module):
 
     def create_target_components(self, target_module_patterns: list[str], m: int) -> nn.ModuleDict:
         """Create target components for the model."""
-        components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {}
+        components: dict[str, LinearComponent | EmbeddingComponent] = {}
         for name, module in self.model.named_modules():
             for pattern in target_module_patterns:
                 if fnmatch.fnmatch(name, pattern):
                     if isinstance(module, nn.Linear):
+                        d_out, d_in = module.weight.shape
                         # Replace "." with "-" in the name to avoid issues with module dict keys
-                        components[name.replace(".", "-")] = linear_module_to_component(module, m=m)
+                        components[name.replace(".", "-")] = LinearComponent(
+                            d_in=d_in, d_out=d_out, m=m, bias=module.bias
+                        )
                     elif isinstance(module, nn.Embedding):
                         components[name.replace(".", "-")] = EmbeddingComponent(
                             vocab_size=module.num_embeddings,
@@ -116,7 +118,7 @@ class ComponentModel(nn.Module):
         self,
         *args: Any,
         module_name: str,
-        component: LinearComponentWithBias | EmbeddingComponent,
+        component: LinearComponent | EmbeddingComponent,
         mask: Float[Tensor, "... m"] | None = None,
         **kwargs: Any,
     ) -> Any:
@@ -141,7 +143,7 @@ class ComponentModel(nn.Module):
     def forward_with_components(
         self,
         *args: Any,
-        components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+        components: dict[str, LinearComponent | EmbeddingComponent],
         masks: dict[str, Float[Tensor, "... m"]] | None = None,
         **kwargs: Any,
     ) -> Any:
@@ -150,7 +152,7 @@ class ComponentModel(nn.Module):
         old_modules = {}
         for component_name, component in components.items():
             module_name = component_name.replace("-", ".")
-            # component: LinearComponentWithBias = self.components[module_name.replace(".", "-")]
+            # component: LinearComponent = self.components[module_name.replace(".", "-")]
             old_module = self.model.get_submodule(module_name)
             assert old_module is not None
             old_modules[module_name] = old_module
@@ -225,9 +227,6 @@ class ComponentModel(nn.Module):
         2.  A WandB reference of the form ``wandb:<entity>/<project>/runs/<run_id>``.
         """
 
-        # ------------------------------------------------------------------
-        # Locate the checkpoint & config files
-        # ------------------------------------------------------------------
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             api = wandb.Api()
@@ -240,9 +239,6 @@ class ComponentModel(nn.Module):
             )
             out_dir = Path(path).parent
 
-        # ------------------------------------------------------------------
-        # Recreate the original config & base model
-        # ------------------------------------------------------------------
         model_weights = torch.load(paths.model, map_location="cpu", weights_only=True)
         with open(paths.config) as f:
             config = Config(**yaml.safe_load(f))
@@ -273,7 +269,7 @@ class ComponentModel(nn.Module):
 
 
 def init_As_and_Bs_(
-    model: ComponentModel, components: dict[str, LinearComponentWithBias | EmbeddingComponent]
+    model: ComponentModel, components: dict[str, LinearComponent | EmbeddingComponent]
 ) -> None:
     """Initialize the A and B matrices.
     1. Normalize every component to 1.

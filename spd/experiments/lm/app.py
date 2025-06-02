@@ -21,10 +21,9 @@ from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
 from spd.data import DatasetConfig
-from spd.experiments.lm.models import EmbeddingComponent
 from spd.log import logger
 from spd.models.component_model import ComponentModel
-from spd.models.components import Gate, GateMLP, LinearComponentWithBias
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
 
@@ -41,7 +40,7 @@ class AppData:
     config: Config
     dataloader_iter_fn: Callable[[], Iterator[dict[str, Any]]]
     gates: dict[str, Gate | GateMLP]
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent]
+    components: dict[str, LinearComponent | EmbeddingComponent]
     target_layer_names: list[str]
     device: str
 
@@ -132,7 +131,7 @@ def initialize(model_path: ModelPath) -> AppData:
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in ss_model.gates.items()
     }  # type: ignore[reportAssignmentType]
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
+    components: dict[str, LinearComponent | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
     }  # type: ignore[reportAssignmentType]
     target_layer_names = sorted(list(components.keys()))
