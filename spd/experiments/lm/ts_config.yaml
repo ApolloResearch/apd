@@ -2,17 +2,17 @@
 
 # --- WandB ---
 wandb_project: spd-lm
-# wandb_project: null # Project name for Weights & Biases
-wandb_run_name: null # Set specific run name (optional, otherwise generated)
-wandb_run_name_prefix: "" # Prefix for generated run name
+# wandb_project: null
+wandb_run_name: null
+wandb_run_name_prefix: ""
 
 # --- General ---
 seed: 0
-unit_norm_matrices: false # Whether to enforce unit norm on A matrices (not typically used here)
-m: 100 # Rank of the decomposition / number of components per layer
-n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
+unit_norm_matrices: false
+m: 100
+n_random_masks: 1
 n_gate_hidden_neurons: null
-init_from_target_model: false # Not implemented/applicable for this setup
+init_from_target_model: false
 target_module_patterns: ["transformer.h.3.mlp.c_fc"]
 
 # --- Loss Coefficients ---
@@ -29,19 +29,19 @@ is_embed_unembed_recon: false
 pnorm: 2.0
 
 # --- Training ---
-batch_size: 4 # Adjust based on GPU memory
-steps: 50_000 # Total training steps
-lr: 1e-4 # Learning rate
-lr_schedule: constant # LR schedule type (constant, linear, cosine, exponential)
-lr_warmup_pct: 0.01 # Percentage of steps for linear LR warmup
-lr_exponential_halflife: null # Required if lr_schedule is exponential
-n_eval_steps: 100 # Number of evaluation steps
+batch_size: 4
+steps: 50_000
+lr: 1e-4
+lr_schedule: constant
+lr_warmup_pct: 0.01
+lr_exponential_halflife: null
+n_eval_steps: 100
 
 # --- Logging & Saving ---
-image_freq: 2000 # Frequency for generating/logging plots
-image_on_first_step: true # Whether to log plots at step 0
-print_freq: 1000 # Frequency for printing logs to console
-save_freq: null # Frequency for saving checkpoints
+image_freq: 2000
+image_on_first_step: true
+print_freq: 1000
+save_freq: null
 log_ce_losses: true
 
 # --- Pretrained model info ---
@@ -52,24 +52,10 @@ tokenizer_name: EleutherAI/gpt-neo-125M
 
 # --- Task Specific ---
 task_config:
-  task_name: lm # Specifies the LM decomposition task
-  max_seq_len: 2048 # Maximum sequence length for truncation/padding
-  buffer_size: 1000 # Buffer size for streaming dataset shuffling
-  dataset_name: "roneneldan/TinyStories" # HuggingFace dataset name
-  column_name: "text" # Column name in dataset to use for LM task
-  train_data_split: "train" # Dataset split to use
-  eval_data_split: "validation" # Dataset split to use
-
-# Config details for the target model taken from https://github.com/danbraunai/simple_stories_train/blob/main/simple_stories_train/models/model_configs.py#L54
-  # "1.25M": LlamaConfig(
-  #     block_size=512,
-  #     vocab_size=4096,
-  #     n_layer=4,
-  #     n_head=4,
-  #     n_embd=128,
-  #     n_intermediate=128 * 4 * 2 // 3 = 341,
-  #     rotary_dim=128 // 4 = 32,
-  #     n_ctx=512,
-  #     n_key_value_heads=2,
-  #     flash_attention=True,
-  # ),
+  task_name: lm
+  max_seq_len: 2048
+  buffer_size: 1000
+  dataset_name: "roneneldan/TinyStories"
+  column_name: "text"
+  train_data_split: "train"
+  eval_data_split: "validation"

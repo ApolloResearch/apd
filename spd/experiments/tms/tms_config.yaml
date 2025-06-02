@@ -1,34 +1,43 @@
 # TMS 5-2
+# --- WandB ---
 wandb_project: spd-tms
 wandb_run_name: null
 wandb_run_name_prefix: ""
+
+# --- General ---
 unit_norm_matrices: false
 seed: 0
 m: 20
-param_match_coeff: 1.0
-masked_recon_coeff: null
-pnorm: 2.0
-lp_sparsity_coeff: 3e-3
-random_mask_recon_coeff: 1
-layerwise_recon_coeff: 1e-1
-layerwise_random_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: null
+init_from_target_model: false
 target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
+# --- Loss Coefficients ---
+param_match_coeff: 1.0
+masked_recon_coeff: null
+random_mask_recon_coeff: 1
+layerwise_recon_coeff: 1e-1
+layerwise_random_recon_coeff: 1.0
+lp_sparsity_coeff: 3e-3
+pnorm: 2.0
 output_loss_type: "mse"
 
+# --- Training ---
 batch_size: 2048
 steps: 40_000
-image_freq: 5_000
-print_freq: 1000
-save_freq: null
 lr: 1e-3
 lr_schedule: cosine
 lr_warmup_pct: 0.0
-init_from_target_model: false
 n_eval_steps: 100
+
+# --- Logging & Saving ---
+image_freq: 5_000
+print_freq: 1000
+save_freq: null
+
+# --- Task Specific ---
 task_config:
   task_name: tms
   feature_probability: 0.05
@@ -38,12 +47,21 @@ task_config:
   pretrained_model_path: "wandb:spd-train-tms/runs/eox01x9i" # 5-2 w/fixed identity
 
 # # TMS 40-10
+# --- WandB ---
 # wandb_project: spd-tms
 # wandb_run_name: null
 # wandb_run_name_prefix: ""
+#
+# --- General ---
 # unit_norm_matrices: false
 # seed: 0
 # m: 200
+# n_random_masks: 1
+# n_gate_hidden_neurons: 16
+# # n_gate_hidden_neurons: null
+# target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
+#
+# --- Loss Coefficients ---
 # param_match_coeff: 1.0
 # masked_recon_coeff: null
 # pnorm: 2.0
@@ -51,13 +69,9 @@ task_config:
 # random_mask_recon_coeff: 1
 # layerwise_recon_coeff: null
 # layerwise_random_recon_coeff: 1.0
-# n_random_masks: 1
-# n_gate_hidden_neurons: 16
-# # n_gate_hidden_neurons: null
-# target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
-
 # output_loss_type: "mse"
-
+#
+# --- Training ---
 # batch_size: 2048
 # steps: 20_000
 # image_freq: 5_000
@@ -66,10 +80,18 @@ task_config:
 # lr: 1e-3
 # lr_schedule: constant
 # lr_warmup_pct: 0.0
-# init_from_target_model: false
 # n_eval_steps: 100
-
-
+# init_from_target_model: false
+#
+# --- Logging & Saving ---
+# image_freq: 5_000
+# print_freq: 1000
+# save_freq: null
+#
+# --- Task Specific ---
+# n_eval_steps: 100
+#
+#
 # task_config:
 #   task_name: tms
 #   feature_probability: 0.05

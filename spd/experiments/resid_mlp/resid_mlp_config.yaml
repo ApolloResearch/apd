@@ -1,39 +1,46 @@
 # ########## 1 layer ##########
+# --- WandB ---
 wandb_project: spd-resid-mlp
 wandb_run_name: null
 wandb_run_name_prefix: ""
+
+# --- General ---
 unit_norm_matrices: false
 seed: 0
 m: 200
-param_match_coeff: 1.0
-masked_recon_coeff: null
-random_mask_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
+init_from_target_model: false
 target_module_patterns:
   - "layers.*.mlp_in"
   - "layers.*.mlp_out"
 
-
+# --- Loss Coefficients ---
+param_match_coeff: 1.0
+masked_recon_coeff: null
+random_mask_recon_coeff: 1.0
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
+lp_sparsity_coeff: 1e-5
 output_loss_type: mse
 pnorm: 2
-lp_sparsity_coeff: 1e-5
+
+# --- Training ---
 batch_size: 2048
 steps: 30_000
-image_freq: 5_000
-print_freq: 100
-save_freq: null
 lr: 3e-3
 lr_schedule: constant
 lr_warmup_pct: 0.0
-image_on_first_step: true
-init_from_target_model: false
-
 n_eval_steps: 100
 
+# --- Logging & Saving ---
+image_freq: 5_000
+image_on_first_step: true
+print_freq: 100
+save_freq: null
+
+# --- Task Specific ---
 task_config:
   task_name: residual_mlp
   feature_probability: 0.01
@@ -43,31 +50,45 @@ task_config:
   # pretrained_model_path: wandb:spd-train-resid-mlp/runs/44nbrrue # 1 layer
   pretrained_model_path: wandb:spd-train-resid-mlp/runs/zas5yjdl # 1 layer # Lucius run from slack
 
-
-########## 2 layer ##########
+# ########## 2 layer ##########
+# # --- WandB ---
 # wandb_project: spd-resid-mlp
 # wandb_run_name: null
 # wandb_run_name_prefix: ""
+
+# # --- General ---
 # unit_norm_matrices: false
 # seed: 0
 # m: 200
+# n_random_masks: 1
+# n_gate_hidden_neurons: 8
+# init_from_target_model: false
+# target_module_patterns:
+#   - "layers.*.mlp_in"
+#   - "layers.*.mlp_out"
+
+# # --- Loss Coefficients ---
 # param_match_coeff: 1.0
 # masked_recon_coeff: 2.0
 # random_mask_recon_coeff: 1.0
-# n_random_masks: 1
-# n_gate_hidden_neurons: 8
-# pnorm: 0.9
 # lp_sparsity_coeff: 3e-3
+# pnorm: 0.9
+
+# # --- Training ---
 # batch_size: 256
 # steps: 10_000
-# image_freq: 5_000
-# print_freq: 500
-# save_freq: 10_000
 # lr: 1e-3
 # lr_schedule: cosine
 # lr_warmup_pct: 0.01
+# n_eval_steps: 100
+
+# # --- Logging & Saving ---
+# image_freq: 5_000
 # image_on_first_step: true
-# init_from_target_model: false
+# print_freq: 500
+# save_freq: null
+
+# # --- Task Specific ---
 # task_config:
 #   task_name: residual_mlp
 #   feature_probability: 0.01
