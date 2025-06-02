@@ -28,50 +28,6 @@ def get_nested_module_attr(module: nn.Module, access_string: str) -> Any:
     return mod
 
 
-def collect_nested_module_attrs(
-    module: nn.Module,
-    attr_name: str,
-    include_attr_name: bool = True,
-) -> dict[str, Tensor]:
-    """Collect all attributes matching attr_name from a module and all its submodules.
-
-    Args:
-        module: The module to collect attributes from
-        attr_name: Name of the attributes to collect from module and all submodules. E.g. "A".
-        include_attr_name: If True, the attribute name is included in the key of the dictionary.
-            E.g. if attr_name is "A", the key will be "root.A" or "linear1.A".
-
-    Returns:
-        Dictionary mapping module names to their attribute values
-
-    Raises:
-        - ValueError: If no modules with the specified attribute are found
-        - ValueError: If the attribute is not a tensor
-    """
-    attributes: dict[str, Tensor] = {}
-
-    all_modules = module.named_modules()
-    for name, submodule in all_modules:
-        if hasattr(submodule, attr_name):
-            # For root module, name will be empty string
-            submodule_attr = getattr(submodule, attr_name)
-            if not isinstance(submodule_attr, Tensor):
-                raise ValueError(
-                    f"Attribute '{attr_name}' is not a tensor. "
-                    f"Available modules: {[name for name, _ in all_modules]}"
-                )
-            key = name + "." + attr_name if include_attr_name else name
-            attributes[key] = submodule_attr
-
-    if not attributes:
-        raise ValueError(
-            f"No modules found with attribute '{attr_name}'. "
-            f"Available modules: {[name for name, _ in all_modules]}"
-        )
-
-    return attributes
-
-
 @torch.inference_mode()
 def remove_grad_parallel_to_subnetwork_vecs(
     A: Float[Tensor, "... d_in m"], A_grad: Float[Tensor, "... d_in m"]

@@ -14,18 +14,12 @@ import wandb
 import yaml
 
 from spd.configs import Config, TMSTaskConfig
-from spd.experiments.lm.lm_decomposition import optimize_lm
+from spd.data_utils import DatasetGeneratedDataLoader, SparseFeatureDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import resid_mlp_plot_results_fn
 from spd.experiments.tms.models import TMSModel, TMSModelConfig
 from spd.log import logger
-from spd.run_spd import get_common_run_name_suffix
-from spd.utils import (
-    DatasetGeneratedDataLoader,
-    SparseFeatureDataset,
-    get_device,
-    load_config,
-    set_seed,
-)
+from spd.run_spd import get_common_run_name_suffix, optimize
+from spd.utils import get_device, load_config, set_seed
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -117,7 +111,7 @@ def main(
     if target_model.config.tied_weights:
         tied_weights = [("linear1", "linear2")]
 
-    optimize_lm(
+    optimize(
         target_model=target_model,
         config=config,
         device=device,

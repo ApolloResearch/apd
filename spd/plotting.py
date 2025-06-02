@@ -1,33 +1,31 @@
+import math
+from typing import Any
+
 import einops
-import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import numpy as np
 import torch
+import wandb
 from jaxtyping import Float
+from matplotlib import pyplot as plt
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
-from spd.experiments.lm.models import ComponentModel
-from spd.hooks import HookedRootModule
-from spd.models.base import SPDModel
-from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponentWithBias
-from spd.module_utils import collect_nested_module_attrs
-from spd.run_spd import calc_component_acts, calc_masks
+from spd.models.component_model import ComponentModel
+from spd.models.component_utils import calc_component_acts, calc_masks
+from spd.models.components import (
+    EmbeddingComponent,
+    Gate,
+    GateMLP,
+    LinearComponentWithBias,
+)
 
 
 def permute_to_identity(
-    mask: Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"],
-) -> tuple[
-    Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"],
-    Float[Tensor, "n_instances m"] | Float[Tensor, " m"],
-]:
-    """Returns (permuted_mask, permutation_indices)
-
-    Supports both (batch, m) and (batch, n_instances, m) shaped masks.
-    For (batch, m) input, returns (batch, m) mask and (m,) permutation indices.
-    For (batch, n_instances, m) input, returns (batch, n_instances, m) mask and (n_instances, m) permutation indices.
-    """
+    mask: Float[Tensor, "batch m"],
+) -> tuple[Float[Tensor, "batch m"], Float[Tensor, " m"]]:
+    """Returns (permuted_mask, permutation_indices)."""
 
     original_shape = mask.shape
     if mask.ndim == 2:
@@ -99,7 +97,6 @@ def plot_mask_vals(
     relud_masks_raw = calc_masks(
         gates=gates,
         target_component_acts=target_component_acts,
-        attributions=None,
         detach_inputs=False,
     )[1]
 
@@ -131,78 +128,6 @@ def plot_mask_vals(
         axs[j, 0].set_xlabel("Mask index")
         axs[j, 0].set_ylabel("Input feature index")
         axs[j, 0].set_title(mask_name)
-
-    # Add unified colorbar
-    norm = plt.Normalize(
-        vmin=min(mask.min().item() for mask in relud_masks.values()),
-        vmax=max(mask.max().item() for mask in relud_masks.values()),
-    )
-    for im in images:
-        im.set_norm(norm)
-    fig.colorbar(images[0], ax=axs.ravel().tolist())
-
-    # Add a title which shows the input magnitude
-    fig.suptitle(f"Input magnitude: {input_magnitude}")
-
-    return fig, all_perm_indices
-
-
-def plot_mask_vals_tms(
-    model: SPDModel,
-    target_model: HookedRootModule,
-    gates: dict[str, Gate | GateMLP],
-    device: str,
-    input_magnitude: float,
-) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
-    """Plot the values of the mask for a batch of inputs with single active features."""
-    # First, create a batch of inputs with single active features
-    n_features = model.n_features
-    n_instances = model.n_instances
-    batch = torch.eye(n_features, device=device) * input_magnitude
-    batch = einops.repeat(
-        batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
-    )
-
-    # Forward pass with target model
-    target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
-    target_cache = target_model.run_with_cache(batch, names_filter=target_cache_filter)[1]
-    pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
-    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-
-    target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
-
-    relud_masks_raw = calc_masks(
-        gates=gates, target_component_acts=target_component_acts, attributions=None
-    )[1]
-
-    relud_masks = {}
-    all_perm_indices = {}
-    for k, v in relud_masks_raw.items():
-        relud_masks[k], all_perm_indices[k] = permute_to_identity(mask=v)
-
-    # Create figure with better layout and sizing
-    fig, axs = plt.subplots(
-        len(relud_masks),
-        n_instances,
-        figsize=(5 * n_instances, 5 * len(relud_masks)),
-        constrained_layout=True,
-        squeeze=False,
-    )
-    axs = np.array(axs)
-
-    images = []
-    for i in range(n_instances):
-        axs[0, i].set_title(f"Instance {i}")
-        for j, (mask_name, mask) in enumerate(relud_masks.items()):
-            # mask has shape (batch, n_instances, m)
-            mask_data = mask[:, i, :].detach().cpu().numpy()
-            im = axs[j, i].matshow(mask_data, aspect="auto", cmap="Reds")
-            images.append(im)
-
-            axs[j, i].set_xlabel("Mask index")
-            if i == 0:  # Only set ylabel for leftmost plots
-                axs[j, i].set_ylabel("Input feature index")
-            axs[j, i].set_title(mask_name)
 
     # Add unified colorbar
     norm = plt.Normalize(
@@ -359,14 +284,16 @@ def plot_AB_matrices(
 
 
 def plot_AB_matrices_tms(
-    model: SPDModel,
+    model: Any,
     device: str,
     all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
 ) -> plt.Figure:
     """Plot A and B matrices for each instance, grouped by layer."""
+    # TODO: Create plot without n_instances
     # Collect all A and B matrices
-    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-    Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
+    # Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
+    As = {}
+    Bs = {}
     n_instances = model.n_instances
 
     # Verify that A and B matrices have matching names
@@ -430,4 +357,71 @@ def plot_AB_matrices_tms(
     for im in images:
         im.set_norm(norm)
     fig.colorbar(images[0], ax=axs.ravel().tolist())
+    return fig
+
+
+def create_embed_mask_sample_table(
+    masks: dict[str, Float[Tensor, "... m"]],
+) -> wandb.Table | None:
+    """Create a wandb table visualizing embedding mask values.
+
+    Args:
+        masks: Dictionary of masks for each component.
+
+    Returns:
+        A wandb Table object or None if transformer.wte not in masks.
+    """
+    if "transformer.wte" not in masks:
+        return None
+
+    # Create a 20x10 table for wandb
+    table_data = []
+    # Add "Row Name" as the first column
+    component_names = ["TokenSample"] + ["CompVal" for _ in range(10)]
+
+    for i, ma in enumerate(masks["transformer.wte"][0, :20]):
+        active_values = ma[ma > 0.1].tolist()
+        # Cap at 10 components
+        active_values = active_values[:10]
+        formatted_values = [f"{val:.2f}" for val in active_values]
+        # Pad with empty strings if fewer than 10 components
+        while len(formatted_values) < 10:
+            formatted_values.append("0")
+        # Add row name as the first element
+        table_data.append([f"{i}"] + formatted_values)
+
+    return wandb.Table(data=table_data, columns=component_names)
+
+
+def plot_mean_component_activation_counts(
+    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
+) -> plt.Figure:
+    """Plots the mean activation counts for each component module in a grid."""
+    n_modules = len(mean_component_activation_counts)
+    max_cols = 6
+    n_cols = min(n_modules, max_cols)
+    # Calculate the number of rows needed, rounding up
+    n_rows = math.ceil(n_modules / n_cols)
+
+    # Create a figure with the calculated number of rows and columns
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), squeeze=False)
+    # Ensure axs is always a 2D array for consistent indexing, even if n_modules is 1
+    axs = axs.flatten()  # Flatten the axes array for easy iteration
+
+    # Iterate through modules and plot each histogram on its corresponding axis
+    for i, (module_name, counts) in enumerate(mean_component_activation_counts.items()):
+        ax = axs[i]
+        ax.hist(counts.detach().cpu().numpy(), bins=100)
+        ax.set_yscale("log")
+        ax.set_title(module_name)  # Add module name as title to each subplot
+        ax.set_xlabel("Mean Activation Count")
+        ax.set_ylabel("Frequency")
+
+    # Hide any unused subplots if the grid isn't perfectly filled
+    for i in range(n_modules, n_rows * n_cols):
+        axs[i].axis("off")
+
+    # Adjust layout to prevent overlapping titles/labels
+    fig.tight_layout()
+
     return fig

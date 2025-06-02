@@ -7,7 +7,6 @@ seed: 0
 m: 200
 param_match_coeff: 1.0
 masked_recon_coeff: null
-# act_recon_coeff: 1
 random_mask_recon_coeff: 1.0
 n_random_masks: 1
 n_gate_hidden_neurons: 16
@@ -54,7 +53,6 @@ task_config:
 # m: 200
 # param_match_coeff: 1.0
 # masked_recon_coeff: 2.0
-# act_recon_coeff: 1.0
 # random_mask_recon_coeff: 1.0
 # n_random_masks: 1
 # n_gate_hidden_neurons: 8

@@ -15,15 +15,20 @@ from jaxtyping import Float
 from torch import Tensor
 
 from spd.configs import Config, ResidualMLPTaskConfig
-from spd.experiments.lm.lm_decomposition import optimize_lm
-from spd.experiments.lm.models import ComponentModel
+from spd.data_utils import DatasetGeneratedDataLoader
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
-from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponentWithBias
+from spd.models.component_model import ComponentModel
+from spd.models.components import (
+    EmbeddingComponent,
+    Gate,
+    GateMLP,
+    LinearComponentWithBias,
+)
 from spd.plotting import plot_AB_matrices, plot_mask_vals
-from spd.run_spd import get_common_run_name_suffix
-from spd.utils import DatasetGeneratedDataLoader, get_device, load_config, set_seed
+from spd.run_spd import get_common_run_name_suffix, optimize
+from spd.utils import get_device, load_config, set_seed
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -205,7 +210,7 @@ def main(
 
     # TODO: Below not needed when TMS supports config.n_eval_steps
     assert config.n_eval_steps is not None, "n_eval_steps must be set"
-    optimize_lm(
+    optimize(
         target_model=target_model,
         config=config,
         device=device,

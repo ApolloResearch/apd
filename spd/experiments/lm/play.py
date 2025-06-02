@@ -5,9 +5,9 @@ import torch
 from transformers import AutoTokenizer, LlamaForCausalLM
 
 from spd.experiments.lm.models import (
-    ComponentModel,
     EmbeddingComponent,
 )
+from spd.models.component_model import ComponentModel
 from spd.models.components import LinearComponentWithBias
 
 # %%

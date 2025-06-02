@@ -68,8 +68,6 @@ class Config(BaseModel):
     target_module_patterns: list[str]
 
     # --- Loss Coefficients
-    out_recon_coeff: NonNegativeFloat | None = None
-    act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
     masked_recon_coeff: NonNegativeFloat | None = None
     random_mask_recon_coeff: NonNegativeFloat | None = None
@@ -131,17 +129,6 @@ class Config(BaseModel):
         # Warn if neither masked_recon_coeff nor lp_sparsity_coeff is set
         if not self.masked_recon_coeff and not self.lp_sparsity_coeff:
             logger.warning("Neither masked_recon_coeff nor lp_sparsity_coeff is set")
-
-        # Give a warning if both out_recon_coeff and param_match_coeff are > 0
-        if (
-            self.param_match_coeff is not None
-            and self.param_match_coeff > 0
-            and self.out_recon_coeff is not None
-            and self.out_recon_coeff > 0
-        ):
-            logger.warning(
-                "Both param_match_coeff and out_recon_coeff are > 0. It's typical to only set one."
-            )
 
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"

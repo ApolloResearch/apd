@@ -9,7 +9,8 @@ from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
+from spd.experiments.lm.models import EmbeddingComponent
+from spd.models.component_model import ComponentModel
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
 
@@ -53,7 +54,6 @@ def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor,
         masks, _ = calc_masks(
             gates=gates,
             target_component_acts=target_component_acts,
-            attributions=None,
             detach_inputs=True,
         )
 

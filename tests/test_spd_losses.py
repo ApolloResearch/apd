@@ -1,6 +1,6 @@
 import torch
 
-from spd.run_spd import _calc_param_mse
+from spd.losses import _calc_param_mse
 
 
 class TestCalcParamMatchLoss:

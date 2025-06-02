@@ -23,8 +23,6 @@ target_module_patterns: ["model.embed_tokens"]
 # Example: Decompose all MLP layers: ["transformer.h.*.mlp.*_proj"] 
 
 # --- Loss Coefficients ---
-out_recon_coeff: null
-act_recon_coeff: null
 param_match_coeff: 1.0
 masked_recon_coeff: null
 random_mask_recon_coeff: null

@@ -21,8 +21,9 @@ from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
 from spd.data import DatasetConfig
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
+from spd.experiments.lm.models import EmbeddingComponent
 from spd.log import logger
+from spd.models.component_model import ComponentModel
 from spd.models.components import Gate, GateMLP, LinearComponentWithBias
 from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
@@ -225,7 +226,6 @@ def load_next_prompt() -> None:
         masks, _ = calc_masks(
             gates=app_data.gates,
             target_component_acts=target_component_acts,
-            attributions=None,
             detach_inputs=True,  # No gradients needed
         )
     st.session_state.current_masks = masks  # Dict[str, Float[Tensor, "1 seq_len m"]]

@@ -2,120 +2,15 @@
 Vizualises the components of the model.
 """
 
-import math
-
 import torch
-from jaxtyping import Float, Int
-from matplotlib import pyplot as plt
-from torch import Tensor
-from torch.utils.data import DataLoader
 
 from spd.configs import LMTaskConfig
 from spd.data import DatasetConfig, create_data_loader
-from spd.experiments.lm.models import ComponentModel, EmbeddingComponent
 from spd.log import logger
-from spd.models.components import Gate, GateMLP, LinearComponentWithBias
-from spd.run_spd import calc_component_acts, calc_masks
+from spd.models.component_model import ComponentModel
+from spd.models.component_utils import component_activation_statistics
+from spd.plotting import plot_mean_component_activation_counts
 from spd.types import ModelPath
-from spd.utils import extract_batch_data
-
-
-def component_activation_statistics(
-    model: ComponentModel,
-    dataloader: DataLoader[Int[Tensor, "..."]]
-    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
-    n_steps: int,
-    device: str,
-) -> tuple[dict[str, float], dict[str, Float[Tensor, " m"]]]:
-    """Get the number and strength of the masks over the full dataset."""
-    # We used "-" instead of "." as module names can't have "." in them
-    gates: dict[str, Gate | GateMLP] = {
-        k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
-    }  # type: ignore
-    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
-        k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
-    }  # type: ignore
-
-    n_tokens = {module_name.replace("-", "."): 0 for module_name in components}
-    total_n_active_components = {module_name.replace("-", "."): 0 for module_name in components}
-    component_activation_counts = {
-        module_name.replace("-", "."): torch.zeros(model.m, device=device)
-        for module_name in components
-    }
-    data_iter = iter(dataloader)
-    for _ in range(n_steps):
-        # --- Get Batch --- #
-        batch = extract_batch_data(next(data_iter))
-
-        _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
-            batch, module_names=list(components.keys())
-        )
-        As = {module_name: v.A for module_name, v in components.items()}
-
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
-
-        masks, relud_masks = calc_masks(
-            gates=gates,
-            target_component_acts=target_component_acts,
-            attributions=None,
-            detach_inputs=False,
-        )
-        for module_name, mask in masks.items():
-            # mask (batch, pos, m) or (batch, m)
-            n_tokens[module_name] += mask.shape[:-1].numel()
-
-            # Count the number of components that are active at all
-            active_components = mask > 0
-            total_n_active_components[module_name] += int(active_components.sum().item())
-
-            sum_dims = tuple(range(mask.ndim - 1))
-            component_activation_counts[module_name] += active_components.sum(dim=sum_dims)
-
-    # Show the mean number of components
-    mean_n_active_components_per_token: dict[str, float] = {
-        module_name: (total_n_active_components[module_name] / n_tokens[module_name])
-        for module_name in components
-    }
-    mean_component_activation_counts: dict[str, Float[Tensor, " m"]] = {
-        module_name: component_activation_counts[module_name] / n_tokens[module_name]
-        for module_name in components
-    }
-
-    return mean_n_active_components_per_token, mean_component_activation_counts
-
-
-def plot_mean_component_activation_counts(
-    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
-) -> plt.Figure:
-    """Plots the mean activation counts for each component module in a grid."""
-    n_modules = len(mean_component_activation_counts)
-    max_cols = 6
-    n_cols = min(n_modules, max_cols)
-    # Calculate the number of rows needed, rounding up
-    n_rows = math.ceil(n_modules / n_cols)
-
-    # Create a figure with the calculated number of rows and columns
-    fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), squeeze=False)
-    # Ensure axs is always a 2D array for consistent indexing, even if n_modules is 1
-    axs = axs.flatten()  # Flatten the axes array for easy iteration
-
-    # Iterate through modules and plot each histogram on its corresponding axis
-    for i, (module_name, counts) in enumerate(mean_component_activation_counts.items()):
-        ax = axs[i]
-        ax.hist(counts.detach().cpu().numpy(), bins=100)
-        ax.set_yscale("log")
-        ax.set_title(module_name)  # Add module name as title to each subplot
-        ax.set_xlabel("Mean Activation Count")
-        ax.set_ylabel("Frequency")
-
-    # Hide any unused subplots if the grid isn't perfectly filled
-    for i in range(n_modules, n_rows * n_cols):
-        axs[i].axis("off")
-
-    # Adjust layout to prevent overlapping titles/labels
-    fig.tight_layout()
-
-    return fig
 
 
 def main(path: ModelPath) -> None:

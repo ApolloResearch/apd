@@ -16,8 +16,6 @@ init_from_target_model: false # Not implemented/applicable for this setup
 target_module_patterns: ["transformer.h.3.mlp.c_fc"]
 
 # --- Loss Coefficients ---
-out_recon_coeff: null
-act_recon_coeff: null
 param_match_coeff: 1.0
 masked_recon_coeff: null
 random_mask_recon_coeff: null
