@@ -114,7 +114,7 @@ def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
     Adapted from
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
-    WA = model.linear1.weight.detach()
+    WA = model.linear1.weight.T.detach()
     color = plt.cm.viridis(np.array([0.0]))  # type: ignore
     plt.rcParams["figure.dpi"] = 200
     fig, ax = plt.subplots(1, 1, figsize=(2, 2))
@@ -178,11 +178,11 @@ def get_model_and_dataloader(
     ) and model.hidden_layers is not None:
         for i in range(model.config.n_hidden_layers):
             if config.fixed_identity_hidden_layers:
-                model.hidden_layers[i].weight.data[:, :, :] = torch.eye(
+                model.hidden_layers[i].weight.data[:, :] = torch.eye(
                     model.config.n_hidden, device=device
                 )
             elif config.fixed_random_hidden_layers:
-                model.hidden_layers[i].weight.data[:, :, :] = torch.randn_like(
+                model.hidden_layers[i].weight.data[:, :] = torch.randn_like(
                     model.hidden_layers[i].weight
                 )
             model.hidden_layers[i].weight.requires_grad = False
@@ -262,6 +262,7 @@ if __name__ == "__main__":
     #         n_features=5,
     #         n_hidden=2,
     #         n_hidden_layers=0,
+    #         tied_weights=True,
     #         device=device,
     #     ),
     #     feature_probability=0.05,
@@ -275,18 +276,18 @@ if __name__ == "__main__":
     # )
     # TMS 40-10
     config = TMSTrainConfig(
-        wandb_project="spd-train-tms",
+        # wandb_project="spd-train-tms",
         tms_model_config=TMSModelConfig(
-            n_features=40,
-            n_hidden=10,
-            n_hidden_layers=1,
+            n_features=5,
+            n_hidden=2,
+            n_hidden_layers=0,
             tied_weights=True,
             device=device,
         ),
         feature_probability=0.05,
         # feature_probability=0.02, # synced inputs
         batch_size=2048,
-        steps=2000,
+        steps=4000,
         seed=0,
         lr=1e-3,
         data_generation_type="at_least_zero_active",
