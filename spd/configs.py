@@ -80,7 +80,7 @@ class Config(BaseModel):
     embedding_recon_coeff: float | None = None
     is_embed_unembed_recon: bool = False
     pnorm: PositiveFloat
-    output_loss_type: Literal["mse", "kl"] = "kl"
+    output_loss_type: Literal["mse", "kl"]
 
     # --- Training ---
     lr: PositiveFloat

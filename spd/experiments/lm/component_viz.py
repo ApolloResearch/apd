@@ -5,7 +5,7 @@ Vizualises the components of the model.
 import math
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from matplotlib import pyplot as plt
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -22,7 +22,8 @@ from spd.utils import extract_batch_data
 
 def component_activation_statistics(
     model: ComponentModel,
-    dataloader: DataLoader[Float[Tensor, "batch pos"]],
+    dataloader: DataLoader[Int[Tensor, "..."]]
+    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
     n_steps: int,
     device: str,
 ) -> tuple[dict[str, float], dict[str, Float[Tensor, " m"]]]:

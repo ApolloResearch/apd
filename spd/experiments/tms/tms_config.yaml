@@ -43,6 +43,8 @@ n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: null
 target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
+output_loss_type: "mse"
+
 batch_size: 2048
 steps: 20_000
 image_freq: 5_000

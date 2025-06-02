@@ -315,20 +315,27 @@ def calc_masked_recon_loss(
 def init_As_and_Bs_(
     model: ComponentModel, components: dict[str, LinearComponentWithBias | EmbeddingComponent]
 ) -> None:
-    """Initialize the A and B matrices using a scale factor from the target weights."""
+    """Initialize the A and B matrices.
+    1. Normalize every component to 1.
+    2. Take inner product with original model
+    3. This gives you roughly how much overlap there is with the target model.
+    4. Scale the Bs by this value (just so it doesn't interfere with config.unit_norm_matrices
+    """
+    # NOTE: This may increase memory usage if done on GPU.
     for param_name, component in components.items():
         A = component.A
         B = component.B
         target_weight = model.model.get_parameter(param_name + ".weight").T
+
         # Make A and B have unit norm in the d_in and d_out dimensions
         A.data[:] = torch.randn_like(A.data)
         B.data[:] = torch.randn_like(B.data)
-
-        # Make A and B have unit norm in the d_in and d_out dimensions
         A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
         B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
 
+        # Calculate inner products
         m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_in d_out -> m")
+        # Scale B by the inner product.
         B.data[:] = B.data * m_norms.unsqueeze(-1)
 
 
@@ -368,14 +375,14 @@ def optimize_lm(
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 
+    model.to(device)
+    init_As_and_Bs_(model=model, components=components)
+
     if tied_weights is not None:
         # Tie component weights. Assume that the first element is a transpose of the second element
         for src_name, tgt_name in tied_weights:
             components[tgt_name].B.data = components[src_name].A.data.T
             components[tgt_name].A.data = components[src_name].B.data.T
-
-    model.to(device)
-    # init_As_and_Bs_(model=model, components=components)
 
     component_params: list[torch.nn.Parameter] = []
     gate_params: list[torch.nn.Parameter] = []
@@ -632,6 +639,10 @@ def optimize_lm(
                     zero_masked_ce_loss = F.cross_entropy(
                         input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
                     )
+                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
 
                 embed_mask_table = create_embed_mask_sample_table(masks)
                 if embed_mask_table is not None:
@@ -639,11 +650,6 @@ def optimize_lm(
 
                 log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
                 log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
-                if config.log_ce_losses:
-                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
-                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
-                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
-                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
 
                 if config.wandb_project:
                     mask_l_zero = calc_mask_l_zero(masks=masks)
