@@ -68,7 +68,7 @@ def initialize(model_path: ModelPath) -> AppData:
     # Create eval dataloader config
     eval_data_config = DatasetConfig(
         name=task_config.dataset_name,
-        hf_tokenizer_path=tokenizer_path,
+        hf_tokenizer_path=config.pretrained_model_name_hf,
         split=task_config.eval_data_split,
         n_ctx=task_config.max_seq_len,
         is_tokenized=False,

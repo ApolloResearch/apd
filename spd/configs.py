@@ -213,9 +213,11 @@ class Config(BaseModel):
     )
 
     # --- Pretrained model info ---
-    pretrained_model_class: str | None = Field(
-        default=None,
-        description="Fully-qualified class name of the pretrained model to load (e.g. 'transformers.LlamaForCausalLM')",
+    pretrained_model_class: str = Field(
+        ...,
+        description="Fully-qualified class name of the pretrained model to load. Can be defined "
+        "locally or an in external package (e.g. 'transformers.LlamaForCausalLM' or "
+        "'spd.experiments.resid_mlp.models.ResidualMLP').",
     )
     pretrained_model_path: ModelPath | None = Field(
         default=None,

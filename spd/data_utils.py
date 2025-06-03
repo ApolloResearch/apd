@@ -131,12 +131,12 @@ class SparseFeatureDataset(
 
     def _generate_n_feature_active_batch(
         self, batch_size: int, n: int
-    ) -> Float[Tensor, "batch n_instances n_features"]:
-        """Generate a batch with exactly n features active per sample and instance.
+    ) -> Float[Tensor, "batch n_features"]:
+        """Generate a batch with exactly n features active per sample.
 
         Args:
             batch_size: Number of samples in the batch
-            n: Number of features to activate per sample and instance
+            n: Number of features to activate per sample
         """
         if n > self.n_features:
             raise ValueError(
@@ -165,7 +165,7 @@ class SparseFeatureDataset(
         # Place each active feature
         for i in range(n):
             batch.scatter_(
-                dim=2, index=active_features[..., i : i + 1], src=random_values[..., i : i + 1]
+                dim=1, index=active_features[..., i : i + 1], src=random_values[..., i : i + 1]
             )
 
         return batch

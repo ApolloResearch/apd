@@ -69,6 +69,7 @@ def main(
     set_seed(config.seed)
     logger.info(config)
 
+    assert config.pretrained_model_path, "pretrained_model_path must be set"
     target_model, target_model_train_config_dict = TMSModel.from_pretrained(
         config.pretrained_model_path,
     )

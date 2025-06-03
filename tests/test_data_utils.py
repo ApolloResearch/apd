@@ -10,14 +10,12 @@ from spd.utils import compute_feature_importances, resolve_class
 
 
 def test_dataset_at_least_zero_active():
-    n_instances = 3
     n_features = 5
     feature_probability = 0.5
     device = "cpu"
     batch_size = 100
 
     dataset = SparseFeatureDataset(
-        n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
@@ -28,7 +26,7 @@ def test_dataset_at_least_zero_active():
     batch, _ = dataset.generate_batch(batch_size)
 
     # Check shape
-    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+    assert batch.shape == (batch_size, n_features), "Incorrect batch shape"
 
     # Check that the values are between 0 and 1
     assert torch.all((batch >= 0) & (batch <= 1)), "Values should be between 0 and 1"
@@ -41,7 +39,6 @@ def test_dataset_at_least_zero_active():
 
 
 def test_generate_multi_feature_batch_no_zero_samples():
-    n_instances = 3
     n_features = 5
     feature_probability = 0.05  # Low probability to increase chance of zero samples
     device = "cpu"
@@ -49,7 +46,6 @@ def test_generate_multi_feature_batch_no_zero_samples():
     buffer_ratio = 1.5
 
     dataset = SparseFeatureDataset(
-        n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
@@ -60,7 +56,7 @@ def test_generate_multi_feature_batch_no_zero_samples():
     batch = dataset._generate_multi_feature_batch_no_zero_samples(batch_size, buffer_ratio)
 
     # Check shape
-    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+    assert batch.shape == (batch_size, n_features), "Incorrect batch shape"
 
     # Check that the values are between 0 and 1
     assert torch.all((batch >= 0) & (batch <= 1)), "Values should be between 0 and 1"
@@ -72,7 +68,6 @@ def test_generate_multi_feature_batch_no_zero_samples():
 
 @pytest.mark.parametrize("n", [1, 2, 3, 4, 5])
 def test_dataset_exactly_n_active(n: int):
-    n_instances = 3
     n_features = 10
     feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
     device = "cpu"
@@ -96,7 +91,6 @@ def test_dataset_exactly_n_active(n: int):
         5: "exactly_five_active",
     }
     dataset = SparseFeatureDataset(
-        n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
@@ -107,13 +101,12 @@ def test_dataset_exactly_n_active(n: int):
     batch, _ = dataset.generate_batch(batch_size)
 
     # Check shape
-    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+    assert batch.shape == (batch_size, n_features), "Incorrect batch shape"
 
-    # Check that there's exactly one non-zero value per sample and instance
+    # Check that there's exactly one non-zero value per sample
     for sample in batch:
-        for instance in sample:
-            non_zero_count = torch.count_nonzero(instance)
-            assert non_zero_count == n, f"Expected {n} non-zero values, but found {non_zero_count}"
+        non_zero_count = torch.count_nonzero(sample)
+        assert non_zero_count == n, f"Expected {n} non-zero values, but found {non_zero_count}"
 
     # Check that the non-zero values are in the value_range
     non_zero_values = batch[batch != 0]
@@ -127,32 +120,29 @@ def test_dataset_exactly_n_active(n: int):
     [
         (
             1.0,
-            torch.tensor([[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]]),
+            torch.tensor([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
         ),
         (
             0.5,
-            torch.tensor(
-                [[[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]], [[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]]]
-            ),
+            torch.tensor([[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]]),
         ),
         (
             0.0,
-            torch.tensor([[[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
+            torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
         ),
     ],
 )
 def test_compute_feature_importances(
-    importance_val: float, expected_tensor: Float[Tensor, "batch_size n_instances n_features"]
+    importance_val: float, expected_tensor: Float[Tensor, "batch_size n_features"]
 ):
     importances = compute_feature_importances(
-        batch_size=2, n_instances=2, n_features=3, importance_val=importance_val, device="cpu"
+        batch_size=2, n_features=3, importance_val=importance_val, device="cpu"
     )
     torch.testing.assert_close(importances, expected_tensor)
 
 
 def test_sync_inputs_non_overlapping():
     dataset = SparseFeatureDataset(
-        n_instances=1,
         n_features=6,
         feature_probability=0.5,
         device="cpu",
@@ -162,8 +152,7 @@ def test_sync_inputs_non_overlapping():
     )
 
     batch, _ = dataset.generate_batch(5)
-    # Ignore the n_instances dimension
-    batch = batch[:, 0, :]
+
     for sample in batch:
         # If there is a value in 0 or 1, there should be a value in 1 or
         if sample[0] != 0.0:
@@ -180,7 +169,6 @@ def test_sync_inputs_non_overlapping():
 
 def test_sync_inputs_overlapping():
     dataset = SparseFeatureDataset(
-        n_instances=1,
         n_features=6,
         feature_probability=0.5,
         device="cpu",

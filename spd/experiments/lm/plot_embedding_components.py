@@ -9,9 +9,8 @@ from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.lm.models import EmbeddingComponent
 from spd.models.component_model import ComponentModel
-from spd.models.components import Gate, GateMLP
+from spd.models.components import EmbeddingComponent, Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
 
 

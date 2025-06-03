@@ -23,7 +23,7 @@ def main(path: ModelPath) -> None:
     assert isinstance(config.task_config, LMTaskConfig)
     dataset_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        hf_tokenizer_path=config.pretrained_model_path,
+        hf_tokenizer_path=config.pretrained_model_name_hf,
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
