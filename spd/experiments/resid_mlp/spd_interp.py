@@ -106,8 +106,7 @@ def feature_contribution_plot(
 
 
 def compute_target_weight_neuron_contributions(
-    target_model: ResidualMLP,
-    n_features: int | None = None,
+    target_model: ResidualMLP, n_features: int | None = None
 ) -> Float[Tensor, "n_layers n_features d_mlp"]:
     """Compute per-neuron contribution strengths for a *trained* ResidualMLP.
 
@@ -118,12 +117,10 @@ def compute_target_weight_neuron_contributions(
     (or all features if ``n_features is None``).
     """
 
-    # Model & dimension info
-    n_layers: int = target_model.config.n_layers
     n_features = target_model.config.n_features if n_features is None else n_features
 
-    # Gather encoder / decoder weights
     W_E: Float[Tensor, "n_features d_embed"] = target_model.W_E  # type: ignore
+    assert torch.equal(W_E, target_model.W_U.T)
 
     # Stack mlp_in / mlp_out weights across layers so that einsums can broadcast
     W_in: Float[Tensor, "n_layers d_mlp d_embed"] = torch.stack(
@@ -301,7 +298,7 @@ def main():
     set_seed(0)
     device = "cpu" if torch.cuda.is_available() else "cpu"
 
-    path_spd: ModelPath = "wandb:spd-resid-mlp/runs/29nlk4cf"  # 1 layer Dan new code
+    path_spd: ModelPath = "wandb:spd-resid-mlp/runs/9ma33jty"  # 1 layer
     wandb_id = path_spd.split("/")[-1]
 
     model = ComponentModel.from_pretrained(path_spd)[0]
