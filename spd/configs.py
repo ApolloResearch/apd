@@ -118,10 +118,6 @@ class Config(BaseModel):
         default=None,
         description="Hidden dimension for the gate MLP; if None, use a single-layer gate",
     )
-    init_from_target_model: bool = Field(
-        default=False,
-        description="Initialise SPD components directly from the target model's weights",
-    )
     target_module_patterns: list[str] = Field(
         ...,
         description="List of fnmatch-style patterns that select nn.Linear / nn.Embedding modules to decompose",

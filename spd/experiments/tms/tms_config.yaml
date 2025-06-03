@@ -11,7 +11,6 @@ m: 20
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: null
-init_from_target_model: false
 target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
 # --- Loss Coefficients ---
@@ -82,7 +81,6 @@ task_config:
 # lr_schedule: constant
 # lr_warmup_pct: 0.0
 # n_eval_steps: 100
-# init_from_target_model: false
 #
 # --- Logging & Saving ---
 # image_freq: 5_000

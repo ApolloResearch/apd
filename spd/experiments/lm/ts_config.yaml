@@ -12,7 +12,6 @@ unit_norm_matrices: false
 m: 100
 n_random_masks: 1
 n_gate_hidden_neurons: null
-init_from_target_model: false
 target_module_patterns: ["transformer.h.3.mlp.c_fc"]
 
 # --- Loss Coefficients ---
