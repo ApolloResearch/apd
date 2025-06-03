@@ -1,335 +1,1032 @@
+"""Plotting utilities for TMS experiments.
+
+This module provides visualization functions for analyzing TMS models and their
+sparse decompositions, including vector plots, network diagrams, and weight heatmaps.
+"""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from itertools import zip_longest
+
 import matplotlib.collections as mc
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import torch
 from jaxtyping import Float
+from matplotlib.axes import Axes
+from matplotlib.colors import Colormap
+from matplotlib.figure import Figure
 from torch import Tensor
 
 from spd.experiments.tms.models import TMSModel, TMSSPDModel, TMSTaskConfig
 from spd.settings import REPO_ROOT
 
 
-# %%
-def plot_vectors(
-    subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
-    axs: npt.NDArray[np.object_],
-    subnets_indices: npt.NDArray[np.int32],
-) -> None:
-    """2D polygon plot of each subnetwork.
+@dataclass
+class PlotConfig:
+    """Configuration for plot styling and parameters."""
 
-    Adapted from
-    https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
-    """
-    subnets_indices_actual = subnets_indices
-    n_instances, n_subnets, n_features, n_hidden = subnets.shape
+    # Figure sizes
+    vector_plot_size: tuple[float, float] = (3, 6)
+    network_plot_size: tuple[float, float] = (3, 6)
+    heatmap_plot_size: tuple[float, float] = (3.4, 3)
 
-    # Use different colors for each subnetwork if there's only one instance
-    color_vals = np.linspace(0, 1, n_features) if n_instances == 1 else np.zeros(n_features)
-    colors = plt.cm.viridis(color_vals)  # type: ignore
+    # Thresholds
+    subnet_norm_threshold: float = 0.025
+    hidden_layer_threshold: float = 0.0017
 
-    for subnet_idx in range(n_subnets):
-        for instance_idx, ax in enumerate(axs[:, subnet_idx]):
-            arr = subnets[instance_idx, subnet_idx].cpu().detach().numpy()
-            # Plot each feature with its unique color
-            for j in range(n_features):
-                ax.scatter(arr[j, 0], arr[j, 1], color=colors[j])
-                ax.add_collection(
-                    mc.LineCollection([[(0, 0), (arr[j, 0], arr[j, 1])]], colors=[colors[j]])
+    # Styling
+    colormap_vectors: str = "viridis"
+    colormap_weights: str = "gray_r"
+    colormap_heatmap: str = "bwr"
+
+    # Layout
+    vector_plot_limits: float = 1.3
+    network_box_alpha: float = 0.33
+    node_size: int = 200
+
+    # Output
+    dpi: int = 400
+
+
+class TMSAnalyzer:
+    """Analyzer for TMS model decompositions."""
+
+    def __init__(
+        self, spd_model: TMSSPDModel, target_model: TMSModel, config: PlotConfig | None = None
+    ):
+        self.spd_model = spd_model
+        self.target_model = target_model
+        self.config = config or PlotConfig()
+
+    def extract_subnets(
+        self, instance_idx: int = 0
+    ) -> Float[Tensor, "n_subnets n_features n_hidden"]:
+        """Extract subnet weights from the SPD model."""
+        As = self.spd_model.linear1.A.detach().cpu()
+        Bs = self.spd_model.linear1.B.detach().cpu()
+        subnets = torch.einsum("I f C, I C h -> I C f h", As, Bs)
+        return subnets[instance_idx]
+
+    def compute_cosine_similarities(
+        self, instance_idx: int = 0
+    ) -> tuple[
+        Float[Tensor, "n_subnets n_features"],
+        Float[Tensor, "n_features"],
+        Float[Tensor, "n_features n_hidden"],
+    ]:
+        """Compute cosine similarities between subnets and target model."""
+        subnets = self.extract_subnets(instance_idx)
+        target_weights = self.target_model.linear1.weight[instance_idx]
+
+        # Normalize weights
+        subnets_norm = subnets / torch.norm(subnets, dim=-1, keepdim=True)
+        target_norm = target_weights / torch.norm(target_weights, dim=-1, keepdim=True)
+
+        # Compute cosine similarities
+        cosine_sims = torch.einsum("C f h, f h -> C f", subnets_norm, target_norm)
+        max_cosine_sim = cosine_sims.max(dim=0).values
+
+        # Get subnet weights at max cosine similarity
+        max_indices = cosine_sims.max(dim=0).indices
+        subnet_weights_at_max = subnets[
+            max_indices, torch.arange(self.target_model.config.n_features)
+        ]
+
+        return cosine_sims, max_cosine_sim, subnet_weights_at_max
+
+    def filter_significant_subnets(
+        self, subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"]
+    ) -> tuple[Float[Tensor, "... n_subnets n_features n_hidden"], npt.NDArray[np.int32], int]:
+        """Filter subnets based on norm threshold."""
+        # Calculate norms and sum across features dimension
+        subnet_feature_norms = subnets.norm(dim=3).sum(2)
+        subnet_feature_norms_order = subnet_feature_norms.argsort(dim=1, descending=True)
+
+        # Reorder subnets by norm
+        subnets = subnets[:, subnet_feature_norms_order[0]]
+        subnet_feature_norms = subnet_feature_norms[:, subnet_feature_norms_order[0]]
+
+        # Apply threshold
+        mask = subnet_feature_norms > self.config.subnet_norm_threshold
+        n_significant = int((subnet_feature_norms > self.config.subnet_norm_threshold).sum().item())
+
+        # Filter subnets
+        mask = mask.unsqueeze(-1).unsqueeze(-1)
+        filtered_subnets = subnets[mask.expand_as(subnets)].reshape(
+            subnets.size(0), -1, subnets.size(2), subnets.size(3)
+        )
+
+        subnets_indices = subnet_feature_norms_order[0][:n_significant].cpu().numpy()
+
+        return filtered_subnets, subnets_indices, n_significant
+
+
+class VectorPlotter:
+    """Handles 2D vector plotting for subnetworks."""
+
+    def __init__(self, config: PlotConfig):
+        self.config = config
+
+    def plot(
+        self,
+        subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
+        axs: npt.NDArray[np.object_],
+        subnets_indices: npt.NDArray[np.int32],
+    ) -> None:
+        """Create 2D polygon plots of subnetworks."""
+        n_instances, n_subnets, n_features, n_hidden = subnets.shape
+
+        # Use different colors for each feature if single instance
+        color_vals = np.linspace(0, 1, n_features) if n_instances == 1 else np.zeros(n_features)
+        colors = plt.colormaps[self.config.colormap_vectors](color_vals)
+
+        for subnet_idx in range(n_subnets):
+            for instance_idx, ax in enumerate(axs[:, subnet_idx]):
+                self._plot_single_vector(
+                    ax, subnets[instance_idx, subnet_idx].cpu().detach().numpy(), colors
+                )
+                self._style_axis(ax)
+
+                if instance_idx == 0:
+                    ax.set_title(
+                        self._get_subnet_label(subnet_idx, subnets_indices),
+                        pad=10,
+                        fontsize="large",
+                    )
+
+    def _plot_single_vector(
+        self, ax: Axes, vectors: npt.NDArray[np.float64], colors: npt.NDArray[np.float64]
+    ) -> None:
+        """Plot vectors for a single subnet."""
+        n_features = vectors.shape[0]
+
+        for j in range(n_features):
+            # Plot points
+            ax.scatter(vectors[j, 0], vectors[j, 1], color=colors[j])
+            # Plot lines from origin
+            ax.add_collection(
+                mc.LineCollection([[(0, 0), (vectors[j, 0], vectors[j, 1])]], colors=[colors[j]])
+            )
+
+    def _style_axis(self, ax: Axes) -> None:
+        """Apply consistent styling to axis."""
+        ax.set_aspect("equal")
+        ax.set_facecolor("#f6f6f6")
+        ax.set_xlim((-self.config.vector_plot_limits, self.config.vector_plot_limits))
+        ax.set_ylim((-self.config.vector_plot_limits, self.config.vector_plot_limits))
+        ax.tick_params(left=True, right=False, labelleft=False, labelbottom=False, bottom=True)
+
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+        for spine in ["bottom", "left"]:
+            ax.spines[spine].set_position("center")
+
+    @staticmethod
+    def _get_subnet_label(subnet_idx: int, subnets_indices: npt.NDArray[np.int32]) -> str:
+        """Get appropriate label for subnet."""
+        if subnet_idx == 0:
+            return "Target model"
+        elif subnet_idx == 1:
+            return "Sum of components"
+        else:
+            return f"Subcomponent {subnets_indices[subnet_idx - 2]}"
+
+
+class NetworkDiagramPlotter:
+    """Handles neural network diagram plotting."""
+
+    def __init__(self, config: PlotConfig):
+        self.config = config
+
+    def plot(
+        self,
+        subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
+        axs: npt.NDArray[np.object_],
+    ) -> None:
+        """Plot neural network diagrams for models without hidden layers.
+
+        This shows the decomposition of the first linear layer (input → hidden)
+        and its transpose (hidden → output).
+        """
+        n_instances, n_subnets, n_features, n_hidden = subnets.shape
+
+        # Take absolute values for visualization
+        subnets_abs = subnets.abs()
+        max_weights = subnets_abs.amax(dim=(1, 2, 3))
+
+        axs = np.atleast_2d(np.array(axs))
+        self._add_labels(axs[0, 0])
+
+        cmap = plt.colormaps[self.config.colormap_weights]
+
+        for subnet_idx in range(n_subnets):
+            for instance_idx, ax in enumerate(axs[:, subnet_idx]):
+                self._plot_single_network(
+                    ax,
+                    subnets_abs[instance_idx, subnet_idx].cpu().detach().numpy(),
+                    max_weights[instance_idx].item(),
+                    n_features,
+                    n_hidden,
+                    cmap,
+                )
+                self._style_network_axis(ax)
+
+    def _add_labels(self, ax: Axes) -> None:
+        """Add input/output labels to first axis."""
+        ax.text(
+            0.05,
+            0.05,
+            "Outputs (before bias & ReLU)",
+            ha="left",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.text(0.05, 0.95, "Inputs", ha="left", va="center", transform=ax.transAxes)
+
+    def _plot_single_network(
+        self,
+        ax: Axes,
+        weights: npt.NDArray[np.float64],
+        max_weight: float,
+        n_features: int,
+        n_hidden: int,
+        cmap: Colormap,
+    ) -> None:
+        """Plot a single network diagram."""
+        # Define node positions
+        y_input, y_hidden, y_output = 0, -1, -2
+        x_input = np.linspace(0.05, 0.95, n_features).astype(np.float64)
+        x_hidden = np.linspace(0.25, 0.75, n_hidden).astype(np.float64)
+        x_output = np.linspace(0.05, 0.95, n_features).astype(np.float64)
+
+        # Add hidden layer background
+        self._add_hidden_layer_box(ax, y_hidden)
+
+        # Plot nodes
+        self._plot_nodes(
+            ax, x_input, y_input, x_hidden, y_hidden, x_output, y_output, n_features, n_hidden
+        )
+
+        # Plot edges
+        self._plot_edges(
+            ax,
+            weights,
+            max_weight,
+            x_input,
+            y_input,
+            x_hidden,
+            y_hidden,
+            x_output,
+            y_output,
+            n_features,
+            n_hidden,
+            cmap,
+        )
+
+    def _add_hidden_layer_box(self, ax: Axes, y_hidden: float) -> None:
+        """Add background box for hidden layer."""
+        box = plt.Rectangle(
+            (0.1, y_hidden - 0.2),
+            0.8,
+            0.4,
+            fill=True,
+            facecolor="#e4e4e4",
+            edgecolor="none",
+            alpha=self.config.network_box_alpha,
+            transform=ax.transData,
+        )
+        ax.add_patch(box)
+
+    def _plot_nodes(
+        self,
+        ax: Axes,
+        x_input: npt.NDArray[np.float64],
+        y_input: float,
+        x_hidden: npt.NDArray[np.float64],
+        y_hidden: float,
+        x_output: npt.NDArray[np.float64],
+        y_output: float,
+        n_features: int,
+        n_hidden: int,
+    ) -> None:
+        """Plot network nodes."""
+        ax.scatter(
+            x_input,
+            [y_input] * n_features,
+            s=self.config.node_size,
+            color="grey",
+            edgecolors="k",
+            zorder=3,
+        )
+        ax.scatter(
+            x_hidden,
+            [y_hidden] * n_hidden,
+            s=self.config.node_size,
+            color="grey",
+            edgecolors="k",
+            zorder=3,
+        )
+        ax.scatter(
+            x_output,
+            [y_output] * n_features,
+            s=self.config.node_size,
+            color="grey",
+            edgecolors="k",
+            zorder=3,
+        )
+
+    def _plot_edges(
+        self,
+        ax: Axes,
+        weights: npt.NDArray[np.float64],
+        max_weight: float,
+        x_input: npt.NDArray[np.float64],
+        y_input: float,
+        x_hidden: npt.NDArray[np.float64],
+        y_hidden: float,
+        x_output: npt.NDArray[np.float64],
+        y_output: float,
+        n_features: int,
+        n_hidden: int,
+        cmap: Colormap,
+    ) -> None:
+        """Plot network edges with weight-based coloring."""
+        # Ensure max_weight is never zero
+        max_weight = max_weight if max_weight > 0 else 1
+
+        # Input to hidden
+        for i in range(n_features):
+            for h in range(n_hidden):
+                weight = weights[i, h]
+                normalized_weight = weight / max_weight
+                color = cmap(normalized_weight)
+                ax.plot(
+                    [x_input[i], x_hidden[h]],
+                    [y_input, y_hidden],
+                    color=color,
+                    linewidth=0.5 + 1.5 * normalized_weight,
+                    alpha=0.3 + 0.7 * normalized_weight,
                 )
 
-            ax.set_aspect("equal")
-            z = 1.3
-            ax.set_facecolor("#f6f6f6")
-            ax.set_xlim((-z, z))
-            ax.set_ylim((-z, z))
-            ax.tick_params(left=True, right=False, labelleft=False, labelbottom=False, bottom=True)
-            for spine in ["top", "right"]:
-                ax.spines[spine].set_visible(False)
-            for spine in ["bottom", "left"]:
-                ax.spines[spine].set_position("center")
+        # Hidden to output (transpose for W^T)
+        weights_T = weights.T
+        for h in range(n_hidden):
+            for o in range(n_features):
+                weight = weights_T[h, o]
+                normalized_weight = weight / max_weight
+                color = cmap(normalized_weight)
+                ax.plot(
+                    [x_hidden[h], x_output[o]],
+                    [y_hidden, y_output],
+                    color=color,
+                    linewidth=0.5 + 1.5 * normalized_weight,
+                    alpha=0.3 + 0.7 * normalized_weight,
+                )
 
-            if instance_idx == 0:  # Only add labels to the first row
-                if subnet_idx == 0:
-                    label = "Target model"
-                elif subnet_idx == 1:
-                    label = "Sum of components"
+    def _style_network_axis(self, ax: Axes) -> None:
+        """Style network diagram axis."""
+        ax.set_xlim(-0.1, 1.1)
+        ax.set_ylim(-2.5, 0.5)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ["top", "right", "bottom", "left"]:
+            ax.spines[spine].set_visible(False)
+
+
+class FullNetworkDiagramPlotter:
+    """Handles full neural network diagram plotting including hidden layers."""
+
+    def __init__(self, config: PlotConfig):
+        self.config = config
+
+    def plot(self, spd_model: TMSSPDModel, target_model: TMSModel, instance_idx: int = 0) -> Figure:
+        """Plot full network architecture with all layers."""
+        # Extract all layer weights
+        analyzer = TMSAnalyzer(spd_model, target_model, self.config)
+
+        # Get subnet decompositions for linear1
+        As = spd_model.linear1.A.detach().cpu()
+        Bs = spd_model.linear1.B.detach().cpu()
+        linear1_subnets = torch.einsum("I f C, I C h -> I C f h", As, Bs)[instance_idx]
+
+        # Get hidden layer decompositions if they exist
+        hidden_layer_components = None
+        if spd_model.config.n_hidden_layers > 0:
+            hidden_layer_components = []
+            for i in range(spd_model.config.n_hidden_layers):
+                if spd_model.hidden_layers is not None:
+                    hidden_A = spd_model.hidden_layers[i].A[instance_idx].detach().cpu()
+                    hidden_B = spd_model.hidden_layers[i].B[instance_idx].detach().cpu()
+                    hidden_weights = torch.einsum("h C, C j -> C h j", hidden_A, hidden_B)
+                    hidden_layer_components.append(hidden_weights)
+
+        # Determine which components are significant in linear1 vs hidden layers
+        linear1_norms = linear1_subnets.norm(dim=(1, 2))
+        hidden_norms = None
+        if hidden_layer_components:
+            # Sum norms across all hidden layers for each component
+            hidden_norms = torch.zeros(linear1_norms.shape[0])
+            for hw in hidden_layer_components:
+                hidden_norms += hw.norm(dim=(1, 2))
+
+        # Classify components as either "linear" or "hidden" based on where they have larger norms
+        component_types = []
+        for c_idx in range(linear1_norms.shape[0]):
+            if hidden_norms is None:
+                component_types.append("linear")
+            else:
+                if linear1_norms[c_idx] > hidden_norms[c_idx]:
+                    component_types.append("linear")
                 else:
-                    label = f"Component {subnets_indices_actual[subnet_idx - 2]}"
-                ax.set_title(label, pad=10, fontsize="large")
+                    component_types.append("hidden")
 
+        # Filter significant components overall
+        total_norms = linear1_norms.clone()
+        if hidden_norms is not None:
+            total_norms += hidden_norms
 
-def plot_networks(
-    subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
-    axs: npt.NDArray[np.object_],
-) -> None:
-    """Plot neural network diagrams for each W matrix in the subnet variable.
+        significant_mask = total_norms > self.config.subnet_norm_threshold
+        significant_indices = torch.where(significant_mask)[0]
+        n_significant = len(significant_indices)
 
-    Args:
-        subnets: Tensor of shape [n_instances, n_subnets, n_features, n_hidden].
-        axs: Matplotlib axes to plot on.
-    """
+        # Prepare data for plotting
+        plot_configs = []
 
-    n_instances, n_subnets, n_features, n_hidden = subnets.shape
+        # Target model
+        plot_configs.append(
+            {
+                "title": "Target model",
+                "linear1_weights": target_model.linear1.weight[instance_idx].detach().cpu().numpy(),
+                "hidden_weights": [
+                    target_model.hidden_layers[i].weight[instance_idx].detach().cpu().numpy()
+                    for i in range(target_model.config.n_hidden_layers)
+                ]
+                if target_model.config.n_hidden_layers > 0
+                and target_model.hidden_layers is not None
+                else None,
+                "component_type": "full",
+            }
+        )
 
-    # Take the absolute value of the weights
-    subnets_abs = subnets.abs()
+        # Sum of components
+        sum_linear1 = linear1_subnets.sum(dim=0).numpy()
+        sum_hidden = None
+        if hidden_layer_components:
+            sum_hidden = [hw.sum(dim=0).numpy() for hw in hidden_layer_components]
+        plot_configs.append(
+            {
+                "title": "Sum of components",
+                "linear1_weights": sum_linear1,
+                "hidden_weights": sum_hidden,
+                "component_type": "full",
+            }
+        )
 
-    # Find the maximum weight across each instance
-    max_weights = subnets_abs.amax(dim=(1, 2, 3))
+        # Individual significant components
+        for idx in significant_indices:
+            comp_type = component_types[idx]
+            if comp_type == "linear":
+                # Linear component: show weights in linear1/2, zeros in hidden
+                linear_weights = linear1_subnets[idx].numpy()
+                hidden_weights = None
+                if (
+                    target_model.config.n_hidden_layers > 0
+                    and target_model.hidden_layers is not None
+                ):
+                    # Show zeros for hidden layers (not identity)
+                    hidden_weights = [
+                        np.zeros((target_model.config.n_hidden, target_model.config.n_hidden))
+                        for _ in range(target_model.config.n_hidden_layers)
+                    ]
+            else:
+                # Hidden component: show zeros in linear1/2, actual weights in hidden
+                linear_weights = np.zeros(
+                    (target_model.config.n_features, target_model.config.n_hidden)
+                )
+                hidden_weights = None
+                if hidden_layer_components is not None:
+                    hidden_weights = [hw[idx].numpy() for hw in hidden_layer_components]
 
-    axs = np.atleast_2d(np.array(axs))
+            plot_configs.append(
+                {
+                    "title": f"Subcomponent {idx.item()}",
+                    "linear1_weights": linear_weights,
+                    "hidden_weights": hidden_weights,
+                    "component_type": comp_type,
+                }
+            )
 
-    # axs[0, 0].set_xlabel("Outputs (before ReLU and biases)")
-    # Add the above but in text because the x-axis is killed
-    axs[0, 0].text(
-        0.05,
-        0.05,
-        "Outputs (before bias & ReLU)",
-        ha="left",
-        va="center",
-        transform=axs[0, 0].transAxes,
-    )
-    # Also add "input label"
-    axs[0, 0].text(
-        0.05,
-        0.95,
-        "Inputs",
-        ha="left",
-        va="center",
-        transform=axs[0, 0].transAxes,
-    )
+        # Create figure
+        n_plots = len(plot_configs)
+        fig, axs = plt.subplots(
+            nrows=1, ncols=n_plots, figsize=(4 * n_plots, 6 + 2 * spd_model.config.n_hidden_layers)
+        )
 
-    # Grayscale colormap. darker for larger weight
-    cmap = plt.get_cmap("gray_r")
+        # Ensure axs is always iterable
+        if n_plots == 1:
+            axs_array = [axs]
+        else:
+            axs_array = np.array(axs).flatten()
 
-    for subnet_idx in range(n_subnets):
-        for instance_idx, ax in enumerate(axs[:, subnet_idx]):
-            arr = subnets_abs[instance_idx, subnet_idx].cpu().detach().numpy()
+        # Plot each configuration
+        for plot_idx, (ax, config) in enumerate(zip_longest(axs_array, plot_configs)):
+            if ax is None or config is None:
+                break
+            self._plot_full_network(
+                ax,
+                config["linear1_weights"],
+                config["hidden_weights"],
+                config["component_type"],
+                target_model.config.n_features,
+                target_model.config.n_hidden,
+                target_model.config.n_hidden_layers,
+            )
+            ax.set_title(config["title"], pad=10, fontsize="large")
 
-            # Define node positions (top to bottom)
-            y_input, y_hidden, y_output = 0, -1, -2
-            x_input = np.linspace(0.05, 0.95, n_features)
-            x_hidden = np.linspace(0.25, 0.75, n_hidden)
-            x_output = np.linspace(0.05, 0.95, n_features)
+        return fig
 
-            # Add transparent grey box around hidden layer
-            box_width = 0.8
-            box_height = 0.4
+    def _plot_full_network(
+        self,
+        ax: Axes,
+        linear1_weights: npt.NDArray[np.float64],
+        hidden_weights: list[npt.NDArray[np.float64]] | None,
+        component_type: str,
+        n_features: int,
+        n_hidden: int,
+        n_hidden_layers: int,
+    ) -> None:
+        """Plot a complete network architecture."""
+        # Calculate positions
+        total_positions = 3 + n_hidden_layers
+        y_positions = np.linspace(0, -(total_positions - 1), total_positions)
+
+        # Node x positions
+        x_input = np.linspace(0.1, 0.9, n_features).astype(np.float64)
+        x_hidden = np.linspace(0.2, 0.8, n_hidden).astype(np.float64)
+        x_output = np.linspace(0.1, 0.9, n_features).astype(np.float64)
+
+        # Plot nodes
+
+        # Input nodes
+        ax.scatter(
+            x_input,
+            [y_positions[0]] * n_features,
+            s=self.config.node_size,
+            color="grey",
+            edgecolors="k",
+            zorder=3,
+        )
+
+        # All hidden layers
+        for layer_idx in range(1 + n_hidden_layers):
+            y = y_positions[layer_idx + 1]
+            ax.scatter(
+                x_hidden,
+                [y] * n_hidden,
+                s=self.config.node_size,
+                color="grey",
+                edgecolors="k",
+                zorder=3,
+            )
+            # Add background box
             box = plt.Rectangle(
-                (0.5 - box_width / 2, y_hidden - box_height / 2),
-                box_width,
-                box_height,
+                (0.15, y - 0.15),
+                0.7,
+                0.3,
                 fill=True,
                 facecolor="#e4e4e4",
                 edgecolor="none",
-                alpha=0.33,
+                alpha=self.config.network_box_alpha,
                 transform=ax.transData,
             )
             ax.add_patch(box)
 
-            # Plot nodes
-            ax.scatter(
-                x_input, [y_input] * n_features, s=200, color="grey", edgecolors="k", zorder=3
-            )
-            ax.scatter(
-                x_hidden, [y_hidden] * n_hidden, s=200, color="grey", edgecolors="k", zorder=3
-            )
-            ax.scatter(
-                x_output, [y_output] * n_features, s=200, color="grey", edgecolors="k", zorder=3
-            )
+        # Output nodes
+        ax.scatter(
+            x_output,
+            [y_positions[-1]] * n_features,
+            s=self.config.node_size,
+            color="grey",
+            edgecolors="k",
+            zorder=3,
+        )
 
-            # Plot edges from input to hidden layer
-            for idx_input in range(n_features):
-                for idx_hidden in range(n_hidden):
-                    weight = arr[idx_input, idx_hidden]
-                    norm_weight = weight / max_weights[instance_idx]
-                    color = cmap(norm_weight)
+        # Plot edges
+        cmap = plt.colormaps[self.config.colormap_weights]
+
+        # Determine if this component uses linear weights
+        show_linear_weights = component_type in ["full", "linear"]
+
+        # Input to first hidden (linear1)
+        weights_abs = np.abs(linear1_weights)
+        max_weight = weights_abs.max() if weights_abs.max() > 0 else 1
+
+        if show_linear_weights:
+            # Show actual weights
+            for i in range(n_features):
+                for h in range(n_hidden):
+                    weight = weights_abs[i, h]
+                    normalized_weight = weight / max_weight if max_weight > 0 else 0
+                    color = cmap(normalized_weight)
                     ax.plot(
-                        [x_input[idx_input], x_hidden[idx_hidden]],
-                        [y_input, y_hidden],
+                        [x_input[i], x_hidden[h]],
+                        [y_positions[0], y_positions[1]],
                         color=color,
-                        linewidth=1,
+                        linewidth=0.5 + 1.5 * normalized_weight,
+                        alpha=0.3 + 0.7 * normalized_weight,
                     )
+        # If not showing linear weights, draw nothing at all
 
-            # Plot edges from hidden to output layer
-            arr_T = arr.T  # Transpose of W for W^T
-            for idx_hidden in range(n_hidden):
-                for idx_output in range(n_features):
-                    weight = arr_T[idx_hidden, idx_output]
-                    norm_weight = weight / max_weights[instance_idx]
-                    color = cmap(norm_weight)
+        # Hidden to hidden layers
+        if hidden_weights and n_hidden_layers > 0:
+            for layer_idx, hw in enumerate(hidden_weights):
+                hw_abs = np.abs(hw)
+                max_hw = hw_abs.max() if hw_abs.max() > 0 else 1
+                from_y = y_positions[layer_idx + 1]
+                to_y = y_positions[layer_idx + 2]
+
+                # Only draw connections if there are non-zero weights
+                if np.any(hw_abs > 0.01):  # Threshold for visibility
+                    for h1 in range(n_hidden):
+                        for h2 in range(n_hidden):
+                            weight = hw_abs[h1, h2]
+                            normalized_weight = weight / max_hw if max_hw > 0 else 0
+                            if normalized_weight > 0.01:  # Only draw visible connections
+                                color = cmap(normalized_weight)
+                                ax.plot(
+                                    [x_hidden[h1], x_hidden[h2]],
+                                    [from_y, to_y],
+                                    color=color,
+                                    linewidth=0.5 + 1.5 * normalized_weight,
+                                    alpha=0.3 + 0.7 * normalized_weight,
+                                )
+                # If weights are all near zero, draw nothing
+
+        # Last hidden to output (transpose of linear1)
+        if show_linear_weights:
+            linear1_T_abs = weights_abs.T
+            last_hidden_idx = 1 + n_hidden_layers
+            for h in range(n_hidden):
+                for o in range(n_features):
+                    weight = linear1_T_abs[h, o]
+                    normalized_weight = weight / max_weight if max_weight > 0 else 0
+                    color = cmap(normalized_weight)
                     ax.plot(
-                        [x_hidden[idx_hidden], x_output[idx_output]],
-                        [y_hidden, y_output],
+                        [x_hidden[h], x_output[o]],
+                        [y_positions[last_hidden_idx], y_positions[-1]],
                         color=color,
-                        linewidth=1,
+                        linewidth=0.5 + 1.5 * normalized_weight,
+                        alpha=0.3 + 0.7 * normalized_weight,
                     )
+        # If not showing linear weights, draw nothing at all
 
-            # Remove axes for clarity
-            # ax.axis("off")
-            ax.set_xlim(-0.1, 1.1)
-            ax.set_ylim(y_output - 0.5, y_input + 0.5)
-            # Remove x and y ticks and bounding boxes
+        # Add layer labels
+        ax.text(0.0, y_positions[0], "Input", ha="right", va="center", fontsize="medium")
+        ax.text(0.05, y_positions[1], "Hidden 1", ha="right", va="center", fontsize="medium")
+        for i in range(n_hidden_layers):
+            ax.text(
+                0.05,
+                y_positions[i + 2],
+                f"Hidden {i + 2}",
+                ha="right",
+                va="center",
+                fontsize="medium",
+            )
+        ax.text(0.0, y_positions[-1], "Output", ha="right", va="center", fontsize="medium")
+
+        # Style axis
+        ax.set_xlim(-0.2, 1.05)
+        ax.set_ylim(y_positions[-1] - 0.5, y_positions[0] + 0.5)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ["top", "right", "bottom", "left"]:
+            ax.spines[spine].set_visible(False)
+
+
+class HiddenLayerPlotter:
+    """Handles hidden layer weight heatmap plotting."""
+
+    def __init__(self, config: PlotConfig):
+        self.config = config
+
+    def plot(self, spd_model: TMSSPDModel, target_model: TMSModel) -> Figure:
+        """Plot hidden layer weights as heatmaps."""
+        # Extract weights
+        hidden_weights, target_weights, subnets_order = self._extract_hidden_weights(
+            spd_model, target_model
+        )
+
+        # Filter by threshold
+        hidden_weights_norm = hidden_weights.norm(dim=(-1, -2))
+        n_significant = int((hidden_weights_norm > self.config.hidden_layer_threshold).sum().item())
+        n_subnets = n_significant + 2  # Add target and sum
+
+        # Prepare data for plotting
+        sum_weights = hidden_weights.sum(dim=0, keepdim=True)
+        all_weights = torch.cat([target_weights, sum_weights, hidden_weights], dim=0)
+
+        # Create figure
+        fig, axs = plt.subplots(
+            1,
+            n_subnets,
+            figsize=(
+                self.config.heatmap_plot_size[0] * n_subnets,
+                self.config.heatmap_plot_size[1],
+            ),
+        )
+
+        # Ensure axs is iterable even for single subplot
+        from matplotlib.axes import Axes as AxesType
+
+        if isinstance(axs, AxesType):
+            axs_list = [axs]
+        else:
+            axs_list = list(axs)
+
+        # Plot heatmaps
+        self._plot_heatmaps(fig, axs_list, all_weights, subnets_order, n_subnets)
+
+        return fig
+
+    def _extract_hidden_weights(
+        self, spd_model: TMSSPDModel, target_model: TMSModel
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Extract and sort hidden layer weights."""
+        if spd_model.hidden_layers is None or target_model.hidden_layers is None:
+            raise ValueError("Both models must have hidden layers")
+
+        hidden_layer = spd_model.hidden_layers[0]
+        hidden_A = hidden_layer.A[0].detach().cpu()
+        hidden_B = hidden_layer.B[0].detach().cpu()
+        hidden_weights = torch.einsum("f C, C h -> C f h", hidden_A, hidden_B)
+
+        # Sort by norm
+        weights_norm = hidden_weights.norm(dim=(-1, -2))
+        order = weights_norm.argsort(dim=0, descending=True)
+        hidden_weights = hidden_weights[order]
+
+        # Get target weights
+        target_weights = target_model.hidden_layers[0].weight[0].unsqueeze(0).detach().cpu()
+
+        return hidden_weights, target_weights, order
+
+    def _plot_heatmaps(
+        self,
+        fig: Figure,
+        axs: Sequence[Axes],
+        weights: Tensor,
+        subnets_order: Tensor,
+        n_subnets: int,
+    ) -> None:
+        """Plot weight heatmaps with consistent colormap."""
+        cmap = plt.colormaps[self.config.colormap_heatmap]
+        vmax = float(torch.max(torch.abs(weights.min()), torch.abs(weights.max())).item())
+        vmin = -vmax
+
+        for idx in range(n_subnets):
+            ax = axs[idx]
+            im = ax.imshow(weights[idx].cpu().detach().numpy(), cmap=cmap, vmin=vmin, vmax=vmax)
+
+            # Set title
+            if idx == 0:
+                title = "Target model"
+            elif idx == 1:
+                title = "Sum of components"
+            else:
+                title = f"Subcomponent {subnets_order[idx - 2].item()}"
+            ax.set_title(title, pad=10, fontsize="large")
+
+            # Style axis
             ax.set_xticks([])
             ax.set_yticks([])
-            for spine in ["top", "right", "bottom", "left"]:
-                ax.spines[spine].set_visible(False)
+
+        # Add colorbar
+        self._add_colorbar(fig, cmap, vmin, vmax)
+
+    def _add_colorbar(self, fig: Figure, cmap: Colormap, vmin: float, vmax: float) -> None:
+        """Add colorbar to figure."""
+        from matplotlib.cm import ScalarMappable
+        from matplotlib.colors import Normalize
+
+        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # type: ignore
+        cbar = fig.colorbar(
+            ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax)), cax=cbar_ax
+        )
+        cbar_ax.set_ylabel("Weight magnitude", fontsize="large")
+        cbar_ax.tick_params(labelsize="large")
 
 
-def plot_combined(
-    subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
-    target_weights: Float[Tensor, "n_instances n_features n_hidden"],
-    n_instances: int | None = None,
-) -> plt.Figure:
-    """Create a combined figure with both vector and network diagrams side by side."""
-    if n_instances is not None:
-        subnets = subnets[:n_instances]
-        target_weights = target_weights[:n_instances]
-    n_instances, n_subnets_actual, n_features, n_hidden = subnets.shape
+class TMSPlotter:
+    """Main plotting interface for TMS experiments."""
 
-    # We assume n_instances = 1. Larger number of instances is not supported yet.
-    # Only get the subnets whose features have norms that are not all close to zero
-    threshold = 0.01
+    def __init__(
+        self, spd_model: TMSSPDModel, target_model: TMSModel, config: PlotConfig | None = None
+    ):
+        self.config = config or PlotConfig()
+        self.analyzer = TMSAnalyzer(spd_model, target_model, self.config)
+        self.vector_plotter = VectorPlotter(self.config)
+        self.network_plotter = NetworkDiagramPlotter(self.config)
+        self.full_network_plotter = FullNetworkDiagramPlotter(self.config)
+        self.hidden_plotter = HiddenLayerPlotter(self.config)
 
-    # Calculate norms and sum across features dimension
-    subnet_feature_norms = subnets.norm(dim=3).sum(2)
-    subnet_feature_norms_order = subnet_feature_norms.argsort(
-        dim=1, descending=True
-    )  # Shape: [n_instances, n_subnets]
-    subnets = subnets[:, subnet_feature_norms_order[0]]
-    subnet_feature_norms = subnet_feature_norms[:, subnet_feature_norms_order[0]]
-    mask = subnet_feature_norms > threshold  # Shape: [n_instances, n_subnets]
+    def plot_combined_diagram(self, n_instances: int = 1) -> Figure:
+        """Create combined vector and network diagram figure.
 
-    n_subnets = int((subnet_feature_norms > threshold).sum().item())
-    subnets_indices = subnet_feature_norms_order[0][:n_subnets].cpu().numpy()
+        Note: Only works for models without hidden layers.
+        For models with hidden layers, use plot_vectors() and plot_full_network() separately.
+        """
+        if self.analyzer.spd_model.config.n_hidden_layers > 0:
+            raise ValueError(
+                "Combined diagram not supported for models with hidden layers. "
+                "Use plot_vectors() and plot_full_network() separately."
+            )
 
-    # Reshape mask to broadcast correctly with the 4D tensor
-    mask = mask.unsqueeze(-1).unsqueeze(-1)  # Shape: [n_instances, n_subnets, 1, 1]
+        # Extract and prepare data
+        As = self.analyzer.spd_model.linear1.A.detach().cpu()
+        Bs = self.analyzer.spd_model.linear1.B.detach().cpu()
+        subnets = torch.einsum("I f C, I C h -> I C f h", As, Bs)[:n_instances]
+        target_weights = self.analyzer.target_model.linear1.weight.detach().cpu()[:n_instances]
 
-    # Use boolean indexing with broadcasting
-    subnets = subnets[mask.expand_as(subnets)].reshape(
-        subnets.size(0),  # n_instances
-        -1,  # number of subnets that passed threshold (may vary per instance)
-        subnets.size(2),  # n_features
-        subnets.size(3),  # n_hidden
-    )
-    # subnets = subnets[:, subnet_feature_norms_order[0][:n_subnets]]
-    # subnets_indices = subnets_indices[subnet_feature_norms_order[0][:n_subnets]]
+        # Filter significant subnets
+        filtered_subnets, subnets_indices, n_significant = self.analyzer.filter_significant_subnets(
+            subnets
+        )
 
-    # We wish to add two panels to the left: The target model weights and the sum of the subnets
-    # Add an extra dimension to the target weights so we can concatenate them
-    target_subnet = target_weights[:, None, :, :]
-    summed_subnet = subnets.sum(dim=1, keepdim=True)
-    subnets = torch.cat([target_subnet, summed_subnet, subnets], dim=1)
-    n_subnets += 2
+        # Add target and sum panels
+        target_subnet = target_weights[:, None, :, :]
+        summed_subnet = filtered_subnets.sum(dim=1, keepdim=True)
+        all_subnets = torch.cat([target_subnet, summed_subnet, filtered_subnets], dim=1)
+        n_subnets = n_significant + 2
 
-    # Create figure with two rows
-    fig, axs = plt.subplots(
-        nrows=n_instances * 2,
-        ncols=n_subnets,
-        figsize=(3 * n_subnets, 6 * n_instances),
-    )
+        # Create figure
+        fig, axs = plt.subplots(
+            nrows=n_instances * 2,
+            ncols=n_subnets,
+            figsize=(
+                self.config.vector_plot_size[0] * n_subnets,
+                self.config.vector_plot_size[1] * n_instances,
+            ),
+        )
+        plt.subplots_adjust(hspace=0)
 
-    plt.subplots_adjust(hspace=0)
+        axs = np.atleast_2d(np.array(axs))
 
-    axs = np.atleast_2d(np.array(axs))
+        # Plot vectors and networks
+        self.vector_plotter.plot(all_subnets, axs[:n_instances, :], subnets_indices)
+        self.network_plotter.plot(all_subnets, axs[n_instances:, :])
 
-    # Split axes into left (vectors) and right (networks) sides
-    axs_vectors = axs[:n_instances, :]
-    axs_networks = axs[n_instances:, :]
+        return fig
 
-    # Call existing plotting logic with the split axes
-    plot_vectors(subnets=subnets, axs=axs_vectors, subnets_indices=subnets_indices)
-    plot_networks(subnets=subnets, axs=axs_networks)
+    def plot_vectors(self, n_instances: int = 1) -> Figure:
+        """Create figure with only vector diagrams."""
+        # Extract and prepare data
+        As = self.analyzer.spd_model.linear1.A.detach().cpu()
+        Bs = self.analyzer.spd_model.linear1.B.detach().cpu()
+        subnets = torch.einsum("I f C, I C h -> I C f h", As, Bs)[:n_instances]
+        target_weights = self.analyzer.target_model.linear1.weight.detach().cpu()[:n_instances]
 
-    return fig
+        # Filter significant subnets
+        filtered_subnets, subnets_indices, n_significant = self.analyzer.filter_significant_subnets(
+            subnets
+        )
 
+        # Add target and sum panels
+        target_subnet = target_weights[:, None, :, :]
+        summed_subnet = filtered_subnets.sum(dim=1, keepdim=True)
+        all_subnets = torch.cat([target_subnet, summed_subnet, filtered_subnets], dim=1)
+        n_subnets = n_significant + 2
 
-# %%
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    instance_idx = 0
-    # run_id = "wandb:spd-tms/runs/u359w3kq"
-    # run_id = "wandb:spd-tms/runs/hrwrgei2"
-    # run_id = "wandb:spd-tms/runs/3p8qgg6b"
-    # pretrained_model_path = "wandb:spd-train-tms/runs/tmzweoqk"
-    # run_id = "wandb:spd-tms/runs/fj68gebo"
-    # target_model, target_model_train_config_dict = TMSModel.from_pretrained(pretrained_model_path)
-    # spd_model, spd_model_train_config_dict = TMSSPDModel.from_pretrained(run_id)
+        # Create figure
+        fig, axs = plt.subplots(
+            nrows=n_instances,
+            ncols=n_subnets,
+            figsize=(
+                self.config.vector_plot_size[0] * n_subnets,
+                self.config.vector_plot_size[1] * n_instances,
+            ),
+        )
 
-    # spd_model_path = "maskrecon0.00e+00_nrandmasks1_randrecon1.00e+00_p2.00e+00_lpsp5.00e-03_m20_sd0_attr-gra_lr3.00e-02_bs4096_ft5_hid2hid-layers0_20250530_174855_773"
-    # run_id = Path(spd_model_path).parent.stem
+        axs = np.atleast_2d(np.array(axs))
 
-    run_id = "wandb:spd-tms/runs/djtk8hdr"  # TMS 5-2 with no identity
-    run_id_stem = run_id.split("/")[-1]
+        # Plot vectors
+        self.vector_plotter.plot(all_subnets, axs, subnets_indices)
 
-    # Plot showing polygons for each subnet
-    spd_model, config = TMSSPDModel.from_pretrained(run_id)
-    As = spd_model.linear1.A.detach().cpu()
-    Bs = spd_model.linear1.B.detach().cpu()
-    subnets = torch.einsum("I f C, I C h -> I C f h", As, Bs)
+        return fig
 
-    assert isinstance(config.task_config, TMSTaskConfig)
-    target_model, target_model_train_config_dict = TMSModel.from_pretrained(
-        config.task_config.pretrained_model_path
-    )
+    def plot_full_network(self, instance_idx: int = 0) -> Figure:
+        """Create full network diagram showing all layers."""
+        return self.full_network_plotter.plot(
+            self.analyzer.spd_model, self.analyzer.target_model, instance_idx
+        )
 
-    out_dir = REPO_ROOT / "spd/experiments/tms/out/figures/"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / run_id_stem).mkdir(parents=True, exist_ok=True)
+    def plot_cosine_similarity_analysis(self, instance_idx: int = 0) -> Figure:
+        """Plot cosine similarity analysis."""
+        _, max_cosine_sim, _ = self.analyzer.compute_cosine_similarities(instance_idx)
 
-    # %%
-    # Max cosine similarity between subnets and target model
-    def plot_max_cosine_sim(max_cosine_sim: Float[Tensor, " n_features"]) -> plt.Figure:
         fig, ax = plt.subplots()
-        # Make a bar plot of the max cosine similarity for each feature
         ax.bar(range(max_cosine_sim.shape[0]), max_cosine_sim.cpu().detach().numpy())
-        # Add a grey horizontal line at 1
         ax.axhline(1, color="grey", linestyle="--")
         ax.set_xlabel("Input feature index")
         ax.set_ylabel("Max cosine similarity")
-        # Remove top and right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
+
         return fig
 
-    cosine_sims = torch.einsum(
-        "C f h, f h -> C f",
-        subnets[instance_idx] / torch.norm(subnets[instance_idx], dim=-1, keepdim=True),
-        target_model.linear1.weight[instance_idx]
-        / torch.norm(target_model.linear1.weight[instance_idx], dim=-1, keepdim=True),
-    )
-    max_cosine_sim = cosine_sims.max(dim=0).values
-    print(f"Max cosine similarity:\n{max_cosine_sim}")
-    print(f"Mean max cosine similarity: {max_cosine_sim.mean()}")
-    print(f"std max cosine similarity: {max_cosine_sim.std()}")
+    def plot_hidden_layers(self) -> Figure | None:
+        """Plot hidden layer weights if model has hidden layers."""
+        if self.analyzer.spd_model.config.n_hidden_layers > 0:
+            return self.hidden_plotter.plot(self.analyzer.spd_model, self.analyzer.target_model)
+        return None
 
-    # Get the subnet weights at the max cosine similarity
-    subnet_weights_at_max_cosine_sim: Float[Tensor, "n_features n_hidden"] = subnets[
-        instance_idx, cosine_sims.max(dim=0).indices, torch.arange(target_model.config.n_features)
-    ]
-    # Get the norm of the target model weights
-    target_model_weights_norm = torch.norm(
-        target_model.linear1.weight[instance_idx], dim=-1, keepdim=True
-    )
-    # Get the norm of subnet_weights_at_max_cosine_sim
-    subnet_weights_at_max_cosine_sim_norm = torch.norm(
-        subnet_weights_at_max_cosine_sim, dim=-1, keepdim=True
-    )
-    # Divide the subnet weights by the target model weights ratio
-    l2_ratio = subnet_weights_at_max_cosine_sim_norm / target_model_weights_norm
-    print(f"Mean L2 ratio: {l2_ratio.mean()}")
-    print(f"std L2 ratio: {l2_ratio.std()}")
-
-    # Mean bias
-    print(f"Mean bias: {target_model.b_final[instance_idx].mean()}")
-
-    # %%
-    if target_model.config.n_hidden == 2:
-        # We only look at the first instance
-        fig = plot_combined(subnets, target_model.linear1.weight.detach().cpu(), n_instances=1)
-        fig.savefig(
-            out_dir / run_id_stem / "tms_combined_diagram.png", bbox_inches="tight", dpi=400
+    def print_analysis_summary(self, instance_idx: int = 0) -> None:
+        """Print analysis summary statistics."""
+        cosine_sims, max_cosine_sim, subnet_weights_at_max = (
+            self.analyzer.compute_cosine_similarities(instance_idx)
         )
-        print(f"Saved figure to {out_dir / run_id_stem / 'tms_combined_diagram.png'}")
+
+        print(f"Max cosine similarity:\n{max_cosine_sim}")
+        print(f"Mean max cosine similarity: {max_cosine_sim.mean():.4f}")
+        print(f"Std max cosine similarity: {max_cosine_sim.std():.4f}")
+
+        # L2 ratio analysis
+        target_weights = self.analyzer.target_model.linear1.weight[instance_idx]
+        target_norm = torch.norm(target_weights, dim=-1, keepdim=True)
+        subnet_norm = torch.norm(subnet_weights_at_max, dim=-1, keepdim=True)
+        l2_ratio = subnet_norm / target_norm
+
+        print(f"Mean L2 ratio: {l2_ratio.mean():.4f}")
+        print(f"Std L2 ratio: {l2_ratio.std():.4f}")
+        print(f"Mean bias: {self.analyzer.target_model.b_final[instance_idx].mean():.4f}")
+
+
+def main():
+    """Main execution function."""
+    # Configuration
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    instance_idx = 0
+    run_id = "wandb:spd-tms/runs/8hzirm46"  # TMS 5-2 with identity
+    run_id_stem = run_id.split("/")[-1]
+
+    # Setup output directory
+    out_dir = REPO_ROOT / "spd/experiments/tms/out/figures" / run_id_stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load models
+    spd_model, config = TMSSPDModel.from_pretrained(run_id)
+    assert isinstance(config.task_config, TMSTaskConfig)
+    target_model, _ = TMSModel.from_pretrained(config.task_config.pretrained_model_path)
+
+    # Create plotter
+    plotter = TMSPlotter(spd_model, target_model)
+
+    # Print analysis
+    print("=" * 50)
+    print("TMS Analysis Summary")
+    print("=" * 50)
+    plotter.print_analysis_summary(instance_idx)
+
+    # Generate plots based on model architecture
+    if target_model.config.n_hidden == 2:
+        if spd_model.config.n_hidden_layers == 0:
+            # Model without hidden layers - use combined plot
+            fig = plotter.plot_combined_diagram(n_instances=1)
+            fig.savefig(
+                out_dir / "tms_combined_diagram.png", bbox_inches="tight", dpi=plotter.config.dpi
+            )
+            print(f"\nSaved combined diagram to {out_dir / 'tms_combined_diagram.png'}")
+        else:
+            # Model with hidden layers - use separate plots
+            # Vector plot
+            fig = plotter.plot_vectors(n_instances=1)
+            fig.savefig(out_dir / "tms_vectors.png", bbox_inches="tight", dpi=plotter.config.dpi)
+            print(f"\nSaved vectors plot to {out_dir / 'tms_vectors.png'}")
+
+            # Full network plot
+            fig = plotter.plot_full_network(instance_idx)
+            fig.savefig(
+                out_dir / "tms_full_network.png", bbox_inches="tight", dpi=plotter.config.dpi
+            )
+            print(f"Saved full network diagram to {out_dir / 'tms_full_network.png'}")
+
+    # Hidden layer heatmaps (if applicable)
+    if spd_model.config.n_hidden_layers > 0:
+        fig = plotter.plot_hidden_layers()
+        if fig:
+            fig.savefig(
+                out_dir / "tms_hidden_layers.png", bbox_inches="tight", dpi=plotter.config.dpi
+            )
+            print(f"Saved hidden layers plot to {out_dir / 'tms_hidden_layers.png'}")
+
+    # Plot cosine similarity analysis
+    fig = plotter.plot_cosine_similarity_analysis(instance_idx)
+    fig.savefig(
+        out_dir / "cosine_similarity_analysis.png", bbox_inches="tight", dpi=plotter.config.dpi
+    )
+    print(f"Saved cosine similarity analysis to {out_dir / 'cosine_similarity_analysis.png'}")
+
+
+if __name__ == "__main__":
+    main()
