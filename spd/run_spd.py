@@ -263,6 +263,20 @@ def optimize(
             total_loss += config.schatten_coeff * schatten_loss
             loss_terms["loss/schatten_loss"] = schatten_loss.item()
 
+        ####### output recon loss #######
+        if config.out_recon_coeff is not None:
+            masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
+            out_recon_loss = calc_masked_recon_loss(
+                model=model,
+                batch=batch,
+                components=components,
+                masks=masks_all_ones,
+                target_out=target_out,
+                loss_type=config.output_loss_type,
+            )
+            total_loss += config.out_recon_coeff * out_recon_loss
+            loss_terms["loss/output_reconstruction"] = out_recon_loss.item()
+
         ####### embedding recon loss #######
         if config.embedding_recon_coeff is not None:
             assert len(components) == 1, "Only one embedding component is supported"

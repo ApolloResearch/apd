@@ -152,6 +152,10 @@ class Config(BaseModel):
         default=None,
         description="Coefficient for Schatten-norm regularisation (LM only)",
     )
+    out_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for output reconstruction loss",
+    )
     embedding_recon_coeff: float | None = Field(
         default=None,
         description="Coefficient for additional embedding reconstruction loss (LM only)",
