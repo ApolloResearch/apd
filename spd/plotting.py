@@ -112,6 +112,7 @@ def plot_mask_vals(
         figsize=(5, 5 * len(relud_masks)),
         constrained_layout=True,
         squeeze=False,
+        dpi=300,
     )
     axs = np.array(axs)
 
