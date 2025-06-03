@@ -70,7 +70,7 @@ def main(
     logger.info(config)
 
     target_model, target_model_train_config_dict = TMSModel.from_pretrained(
-        task_config.pretrained_model_path
+        config.pretrained_model_path,
     )
     target_model = target_model.to(device)
     target_model.eval()

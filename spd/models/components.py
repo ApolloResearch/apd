@@ -99,9 +99,9 @@ class LinearComponent(nn.Module):
         self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
 
     @property
-    def weight(self) -> Float[Tensor, "d_in d_out"]:
+    def weight(self) -> Float[Tensor, "d_out d_in"]:
         """A @ B"""
-        return einops.einsum(self.A, self.B, "d_in m, m d_out -> d_in d_out")
+        return einops.einsum(self.A, self.B, "d_in m, m d_out -> d_out d_in")
 
     @torch.compile
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:

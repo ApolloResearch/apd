@@ -163,7 +163,7 @@ def optimize(
         target_out, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
         )
-        As = {module_name: v.A for module_name, v in components.items()}
+        As = {module_name: components[module_name].A for module_name in components}
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
@@ -180,18 +180,6 @@ def optimize(
         loss_terms = {}
 
         ####### param match loss #######
-        ################ Use the mask but set them all to 1
-        # masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
-        # assert len(components) == 1, "Only one embedding component is supported"
-        # component = list(components.values())[0]
-        # assert isinstance(component, EmbeddingComponent)
-        # param_match_loss_val = calc_embedding_recon_loss_lm(
-        #     model=model,
-        #     batch=batch,
-        #     component=component,
-        #     masks=[masks_all_ones],
-        #     unembed=config.is_embed_unembed_recon,
-        # )
         param_match_loss_val = calc_param_match_loss(
             components=components,
             target_model=model.model,
@@ -266,6 +254,7 @@ def optimize(
         lp_sparsity_loss = calc_lp_sparsity_loss(relud_masks=relud_masks, pnorm=config.pnorm)
         total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
         loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
+
         ####### Schatten loss #######
         if config.schatten_coeff is not None:
             schatten_loss = calc_schatten_loss(
@@ -273,6 +262,7 @@ def optimize(
             )
             total_loss += config.schatten_coeff * schatten_loss
             loss_terms["loss/schatten_loss"] = schatten_loss.item()
+
         ####### embedding recon loss #######
         if config.embedding_recon_coeff is not None:
             assert len(components) == 1, "Only one embedding component is supported"

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from torch import Tensor, nn
 from wandb.apis.public import Run
 
-from spd.configs import Config, LMTaskConfig
+from spd.configs import Config
 from spd.models.components import (
     EmbeddingComponent,
     Gate,
@@ -243,19 +243,19 @@ class ComponentModel(nn.Module):
         with open(paths.config) as f:
             config = Config(**yaml.safe_load(f))
 
-        assert isinstance(config.task_config, LMTaskConfig)
-
         assert (
-            config.pretrained_model_name is not None and config.pretrained_model_class is not None
+            config.pretrained_model_path is not None and config.pretrained_model_class is not None
         ), (
             "pretrained_model_name and pretrained_model_class must be specified in the config to "
             "reload a ComponentModel."
         )
 
-        base_model = load_pretrained(
+        base_model_raw = load_pretrained(
             path_to_class=config.pretrained_model_class,
-            model_name_or_path=config.pretrained_model_name,
+            model_path=config.pretrained_model_path,
+            model_name_hf=config.pretrained_model_name_hf,
         )
+        base_model = base_model_raw[0] if isinstance(base_model_raw, tuple) else base_model_raw
 
         comp_model = ComponentModel(
             base_model=base_model,
@@ -281,7 +281,9 @@ def init_As_and_Bs_(
     for param_name, component in components.items():
         A = component.A
         B = component.B
-        target_weight = model.model.get_parameter(param_name + ".weight").T
+        target_weight = model.model.get_parameter(param_name + ".weight")
+        if isinstance(component, EmbeddingComponent):
+            target_weight = target_weight.T  # (d_out d_in)
 
         # Make A and B have unit norm in the d_in and d_out dimensions
         A.data[:] = torch.randn_like(A.data)
@@ -290,6 +292,6 @@ def init_As_and_Bs_(
         B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
 
         # Calculate inner products
-        m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_in d_out -> m")
+        m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_out d_in -> m")
         # Scale B by the inner product.
         B.data[:] = B.data * m_norms.unsqueeze(-1)

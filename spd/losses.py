@@ -206,12 +206,8 @@ def calc_param_match_loss(
     for comp_name, component in components.items():
         component_params[comp_name] = component.weight
         submodule = target_model.get_submodule(comp_name)
-        if isinstance(submodule, nn.Linear):
-            target_params[comp_name] = submodule.weight.T
-        elif isinstance(submodule, nn.Embedding):
-            target_params[comp_name] = submodule.weight
-        else:
-            raise ValueError(f"Submodule {comp_name} is not a nn.Linear or nn.Embedding")
+        assert isinstance(submodule, nn.Linear | nn.Embedding)
+        target_params[comp_name] = submodule.weight
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
     param_mse = _calc_param_mse(

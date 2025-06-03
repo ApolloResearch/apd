@@ -6,8 +6,8 @@ from torch import Tensor
 
 from spd.configs import Config
 from spd.experiments.resid_mlp.models import (
+    ResidualMLP,
     ResidualMLPConfig,
-    ResidualMLPModel,
     ResidualMLPSPDConfig,
     ResidualMLPSPDModel,
     ResidualMLPTaskConfig,
@@ -66,7 +66,7 @@ def test_resid_mlp_decomposition_happy_path() -> None:
 
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     # Create a pretrained model
-    target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
+    target_model = ResidualMLP(config=resid_mlp_config).to(device)
 
     # Create the SPD model
     spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), m=config.m)
@@ -156,7 +156,7 @@ def test_resid_mlp_equivalent_to_raw_model() -> None:
         out_bias=True,
     )
 
-    target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
+    target_model = ResidualMLP(config=resid_mlp_config).to(device)
 
     # Create the SPD model
     resid_mlp_spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), m=m)
@@ -225,7 +225,7 @@ def test_init_resid_mlp_spd_model_from_target() -> None:
         in_bias=True,
         out_bias=True,
     )
-    target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
+    target_model = ResidualMLP(config=resid_mlp_config).to(device)
 
     # Create the SPD model with m equal to d_mlp
     resid_mlp_spd_config = ResidualMLPSPDConfig(

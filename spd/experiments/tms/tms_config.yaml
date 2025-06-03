@@ -22,7 +22,7 @@ layerwise_recon_coeff: 1e-1
 layerwise_random_recon_coeff: 1.0
 lp_sparsity_coeff: 3e-3
 pnorm: 2.0
-output_loss_type: "mse"
+output_loss_type: mse
 
 # --- Training ---
 batch_size: 2048
@@ -37,14 +37,15 @@ image_freq: 5_000
 print_freq: 1000
 save_freq: null
 
+# --- Pretrained model info ---
+pretrained_model_class: "spd.experiments.tms.models.TMS"
+pretrained_model_path: "wandb:spd-train-tms/runs/egtp88sf" # 1 hidden w/fixed identity
+
 # --- Task Specific ---
 task_config:
   task_name: tms
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
-  # pretrained_model_path: "wandb:spd-train-tms/runs/tventgtx" # 5-2
-  # pretrained_model_path: "wandb:spd-train-tms/runs/s52zr0k5" # 5-2 w/fixed identity
-  pretrained_model_path: "wandb:spd-train-tms/runs/eox01x9i" # 5-2 w/fixed identity
 
 # # TMS 40-10
 # --- WandB ---
@@ -87,15 +88,13 @@ task_config:
 # image_freq: 5_000
 # print_freq: 1000
 # save_freq: null
-#
+
+# --- Pretrained model info ---
+# pretrained_model_class: "spd.experiments.tms.models.TMS"
+# pretrained_model_name: "wandb:spd-train-tms/runs/" # 1 hidden w/fixed identity
+
 # --- Task Specific ---
-# n_eval_steps: 100
-#
-#
 # task_config:
 #   task_name: tms
 #   feature_probability: 0.05
 #   data_generation_type: "at_least_zero_active"
-#   # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
-#   pretrained_model_path: "wandb:spd-train-tms/runs/me2x5oeo" # 1 hidden layer fixed to identity
-#   # pretrained_model_path: "wandb:spd-train-tms/runs/e90lfi1j" # 1 hidden layer fixed to identity

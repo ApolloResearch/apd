@@ -112,19 +112,9 @@ class TMSModel(nn.Module):
         with open(paths.tms_train_config) as f:
             tms_train_config_dict = yaml.safe_load(f)
 
-        # TODO: REMOVE THIS, JUST FOR TEMPORARY BACKTESTING
-        tms_train_config_dict["tms_model_config"]["tied_weights"] = True
-        del tms_train_config_dict["tms_model_config"]["n_instances"]
         tms_config = TMSModelConfig(**tms_train_config_dict["tms_model_config"])
         tms = cls(config=tms_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
-
-        # TODO: REMOVE THIS, JUST FOR TEMPORARY BACKTESTING
-        params["linear2.bias"] = params.pop("b_final")
-        # Just get the first instance for all params
-        params = {k: v[0] for k, v in params.items()}
-        params["linear2.weight"] = params["linear1.weight"]
-        params["linear1.weight"] = params["linear1.weight"].T
         tms.load_state_dict(params)
 
         if tms_config.tied_weights:

@@ -16,7 +16,7 @@ from torch import Tensor
 
 from spd.configs import Config, ResidualMLPTaskConfig
 from spd.data_utils import DatasetGeneratedDataLoader
-from spd.experiments.resid_mlp.models import ResidualMLPModel
+from spd.experiments.resid_mlp.models import ResidualMLP
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
 from spd.models.component_model import ComponentModel
@@ -124,7 +124,7 @@ def resid_mlp_plot_results_fn(
 def save_target_model_info(
     save_to_wandb: bool,
     out_dir: Path,
-    resid_mlp: ResidualMLPModel,
+    resid_mlp: ResidualMLP,
     resid_mlp_train_config_dict: dict[str, Any],
     label_coeffs: Float[Tensor, " n_instances"],
 ) -> None:
@@ -157,8 +157,8 @@ def main(
     print(f"Using device: {device}")
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
 
-    target_model, target_model_train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(
-        config.task_config.pretrained_model_path
+    target_model, target_model_train_config_dict, label_coeffs = ResidualMLP.from_pretrained(
+        config.pretrained_model_path
     )
     target_model = target_model.to(device)
     target_model.eval()

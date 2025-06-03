@@ -18,4 +18,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/lm/lm_config.yaml
+- spd/experiments/lm/ss_config.yaml # Runs simplestories

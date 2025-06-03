@@ -123,6 +123,7 @@ def component_activation_statistics(
     for _ in range(n_steps):
         # --- Get Batch --- #
         batch = extract_batch_data(next(data_iter))
+        batch = batch.to(device)
 
         _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())

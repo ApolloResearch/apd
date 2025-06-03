@@ -14,17 +14,13 @@ from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_va
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from spd.experiments.resid_mlp.models import ResidualMLPConfig, ResidualMLPModel
+from spd.data_utils import DatasetGeneratedDataLoader
+from spd.experiments.resid_mlp.models import ResidualMLP, ResidualMLPConfig
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
 )
 from spd.log import logger
-from spd.utils import (
-    DatasetGeneratedDataLoader,
-    compute_feature_importances,
-    get_lr_schedule_fn,
-    set_seed,
-)
+from spd.utils import compute_feature_importances, get_lr_schedule_fn, set_seed
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -75,7 +71,7 @@ def loss_function(
     out: Float[Tensor, "batch n_features"] | Float[Tensor, "batch d_embed"],
     labels: Float[Tensor, "batch n_features"],
     feature_importances: Float[Tensor, "batch n_features"],
-    model: ResidualMLPModel,
+    model: ResidualMLP,
     config: ResidMLPTrainConfig,
 ) -> Float[Tensor, "batch n_features"] | Float[Tensor, "batch d_embed"]:
     if config.loss_type == "readoff":
@@ -98,7 +94,7 @@ def loss_function(
 
 def train(
     config: ResidMLPTrainConfig,
-    model: ResidualMLPModel,
+    model: ResidualMLP,
     trainable_params: list[nn.Parameter],
     dataloader: DatasetGeneratedDataLoader[
         tuple[
@@ -140,7 +136,6 @@ def train(
     # Add this line to get the lr_schedule_fn
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
-    current_losses = torch.tensor([])
     pbar = tqdm(range(config.steps), total=config.steps)
     for step, (batch, labels) in zip(pbar, dataloader, strict=False):
         if step >= config.steps:
@@ -155,10 +150,9 @@ def train(
         batch: Float[Tensor, "batch n_features"] = batch.to(device)
         labels: Float[Tensor, "batch n_features"] = labels.to(device)
         out = model(batch, return_residual=config.loss_type == "resid")
-        loss: (
-            Float[Tensor, "batch n_instances n_features"]
-            | Float[Tensor, "batch n_instances d_embed"]
-        ) = loss_function(out, labels, feature_importances, model, config)
+        loss: Float[Tensor, "batch n_features"] | Float[Tensor, "batch d_embed"] = loss_function(
+            out, labels, feature_importances, model, config
+        )
         loss = loss.mean()
         loss.backward()
         optimizer.step()
@@ -188,7 +182,7 @@ def train(
     return final_losses
 
 
-def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_instances"]:
+def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, ""]:
     model_cfg = config.resid_mlp_config
     run_name = (
         f"resid_mlp_identity_{config.label_type}_"
@@ -201,7 +195,7 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
 
-    model = ResidualMLPModel(config=model_cfg).to(device)
+    model = ResidualMLP(config=model_cfg).to(device)
 
     if config.fixed_random_embedding or config.fixed_identity_embedding:
         # Don't train the embedding matrices
@@ -243,7 +237,6 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
 
     feature_importances = compute_feature_importances(
         batch_size=config.batch_size,
-        n_instances=None,
         n_features=model_cfg.n_features,
         importance_val=config.importance_val,
         device=device,

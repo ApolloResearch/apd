@@ -65,7 +65,7 @@ class MLP(nn.Module):
         return out
 
 
-class ResidualMLPModel(nn.Module):
+class ResidualMLP(nn.Module):
     def __init__(self, config: ResidualMLPConfig):
         super().__init__()
         self.config = config
@@ -132,7 +132,7 @@ class ResidualMLPModel(nn.Module):
     @classmethod
     def from_pretrained(
         cls, path: ModelPath
-    ) -> tuple["ResidualMLPModel", dict[str, Any], Float[Tensor, " n_features"]]:
+    ) -> tuple["ResidualMLP", dict[str, Any], Float[Tensor, " n_features"]]:
         """Fetch a pretrained model from wandb or a local path to a checkpoint.
 
         Args:

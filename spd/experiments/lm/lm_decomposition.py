@@ -78,17 +78,16 @@ def main(
     # --- Load Model --- #
     logger.info("Loading base language model ...")
 
-    assert config.pretrained_model_name is not None and config.pretrained_model_class is not None, (
-        "Temporarily assume we have pretrained model name and class"
-    )
     target_model = load_pretrained(
-        path_to_class=config.pretrained_model_class, model_name_or_path=config.pretrained_model_name
+        path_to_class=config.pretrained_model_class,
+        model_path=None,
+        model_name_hf=config.pretrained_model_name_hf,
     )
 
     # --- Setup Run Name and Output Dir --- #
     run_name = get_run_name(
         config,
-        pretrained_model_name=config.pretrained_model_name,
+        pretrained_model_name=config.pretrained_model_name_hf,
         max_seq_len=config.task_config.max_seq_len,
     )
     if config.wandb_project:
@@ -109,7 +108,7 @@ def main(
     logger.info("Loading dataset...")
     train_data_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        hf_tokenizer_path=config.pretrained_model_name,
+        hf_tokenizer_path=config.pretrained_model_name_hf,
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
@@ -128,7 +127,7 @@ def main(
 
     eval_data_config = DatasetConfig(
         name=config.task_config.dataset_name,
-        hf_tokenizer_path=config.pretrained_model_name,
+        hf_tokenizer_path=config.pretrained_model_name_hf,
         split=config.task_config.eval_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,

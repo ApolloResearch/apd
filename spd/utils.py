@@ -16,6 +16,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 
 from spd.log import logger
+from spd.types import ModelPath
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -184,19 +185,32 @@ def resolve_class(path: str) -> type[nn.Module]:
     return getattr(module, class_name)
 
 
-def load_pretrained(path_to_class: str, model_name_or_path: Path | str, **kwargs: Any) -> nn.Module:
+def load_pretrained(
+    path_to_class: str,
+    model_path: ModelPath | None = None,
+    model_name_hf: str | None = None,
+    **kwargs: Any,
+) -> nn.Module:
     """Load a model from a path to the class and a model name or path.
+
+    Loads from either huggingface (if model_name_hf is provided) or from a wandb str or local path
+    (if model_path is provided).
 
     Args:
         path_to_class: The path to the class, e.g. "transformers.LlamaForCausalLM" or
             "spd.experiments.resid_mlp.models.ResidMLP"
-        model_name_or_path: The path to the model, e.g. "SimpleStories/SimpleStories-1.25M" or
-            "wandb:spd-train-resid-mlp/runs/zas5yjdl" or "/path/to/model/checkpoint"
+        model_path: The path to the model, e.g. "wandb:spd-train-resid-mlp/runs/zas5yjdl" or
+            "/path/to/model/checkpoint"
+        model_name_hf: The name of the model in the Hugging Face model hub,
+            e.g. "SimpleStories/SimpleStories-1.25M"
     """
+    assert model_path is not None or model_name_hf is not None, (
+        "Either model_path or model_name_hf must be provided."
+    )
     model_cls = resolve_class(path_to_class)
     if not hasattr(model_cls, "from_pretrained"):
         raise TypeError(f"{model_cls} lacks a `from_pretrained` method.")
-    return model_cls.from_pretrained(model_name_or_path, **kwargs)  # type: ignore
+    return model_cls.from_pretrained(model_path or model_name_hf, **kwargs)  # type: ignore
 
 
 def extract_batch_data(

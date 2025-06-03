@@ -30,10 +30,6 @@ class TMSTaskConfig(BaseModel):
         default="at_least_zero_active",
         description="Strategy for generating synthetic data for TMS training",
     )
-    pretrained_model_path: ModelPath = Field(
-        ...,
-        description="Local path or wandb reference to the pretrained TMS model (e.g. 'wandb:spd-tms/runs/si0zbfxf')",
-    )
 
 
 class ResidualMLPTaskConfig(BaseModel):
@@ -52,12 +48,6 @@ class ResidualMLPTaskConfig(BaseModel):
         default="at_least_zero_active",
         description="Strategy for generating synthetic data for residual-MLP training",
     )
-    pretrained_model_path: ModelPath = Field(
-        ...,
-        description="Local path or wandb reference to the pretrained residual-MLP model (e.g. 'wandb:spd-resid-mlp/runs/j9kmavzi')",
-    )
-    # TODO: Move to main config when supported by TMS
-    # List of fnmatch patterns for nn.Linear modules to decompose
 
 
 class LMTaskConfig(BaseModel):
@@ -231,9 +221,14 @@ class Config(BaseModel):
         default=None,
         description="Fully-qualified class name of the pretrained model to load (e.g. 'transformers.LlamaForCausalLM')",
     )
-    pretrained_model_name: str | None = Field(
+    pretrained_model_path: ModelPath | None = Field(
         default=None,
-        description="Model identifier or path recognised by the class' .from_pretrained() method",
+        description="Model identifier. Local path or wandb reference "
+        "(e.g. 'wandb:spd-train-resid-mlp/runs/otxwx80v' or 'mnt/my_model/checkpoint.pth')",
+    )
+    pretrained_model_name_hf: str | None = Field(
+        default=None,
+        description="hf model identifier. E.g. 'SimpleStories/SimpleStories-1.25M'",
     )
     pretrained_model_output_attr: str | None = Field(
         default=None,
