@@ -36,6 +36,7 @@ from spd.models.component_utils import (
 from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.plotting import (
     create_embed_mask_sample_table,
+    plot_mask_histograms,
     plot_mean_component_activation_counts,
 )
 from spd.utils import (
@@ -397,6 +398,11 @@ def optimize(
                         batch_shape=batch.shape,
                         device=device,
                     )
+
+                # plot_mask_histograms returns a dict of figures, so we need to merge it
+                mask_histogram_figs = plot_mask_histograms(masks=masks)
+                fig_dict.update(mask_histogram_figs)
+
                 mean_component_activation_counts = component_activation_statistics(
                     model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
                 )[1]
@@ -448,4 +454,5 @@ def optimize(
                 model.fix_normalized_adam_gradients()
 
             optimizer.step()
+
     logger.info("Finished training loop.")

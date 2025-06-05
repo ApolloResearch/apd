@@ -1,5 +1,4 @@
 import math
-from typing import Any
 
 import einops
 import matplotlib.ticker as tkr
@@ -284,83 +283,6 @@ def plot_AB_matrices(
     return fig
 
 
-def plot_AB_matrices_tms(
-    model: Any,
-    device: str,
-    all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
-) -> plt.Figure:
-    """Plot A and B matrices for each instance, grouped by layer."""
-    # TODO: Create plot without n_instances
-    # Collect all A and B matrices
-    # Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
-    As = {}
-    Bs = {}
-    n_instances = model.n_instances
-
-    # Verify that A and B matrices have matching names
-    A_names = set(As.keys())
-    B_names = set(Bs.keys())
-    assert A_names == B_names, (
-        f"A and B matrices must have matching names. Found A: {A_names}, B: {B_names}"
-    )
-
-    n_layers = len(As)
-
-    # Create figure for plotting - 2 rows per layer (A and B)
-    fig, axs = plt.subplots(
-        2 * n_layers,
-        n_instances,
-        figsize=(5 * n_instances, 5 * 2 * n_layers),
-        constrained_layout=True,
-        squeeze=False,
-    )
-    axs = np.array(axs)
-
-    images = []
-
-    # Plot each layer's A and B matrices for each instance
-    for i in range(n_instances):
-        if i == 0:
-            axs[0, i].set_title(f"Instance {i}")
-
-        # Plot A and B matrices for each layer
-        for j, name in enumerate(sorted(As.keys())):
-            # Plot A matrix
-            A_data = As[name][i]
-            if all_perm_indices is not None:
-                A_data = A_data[:, all_perm_indices[name][i]]
-            A_data = A_data.detach().cpu().numpy()
-            im = axs[2 * j, i].matshow(A_data, aspect="auto", cmap="coolwarm")
-            if i == 0:
-                axs[2 * j, i].set_ylabel("d_in index")
-            axs[2 * j, i].set_xlabel("Component index")
-            axs[2 * j, i].set_title(f"{name} (A matrix)")
-            images.append(im)
-
-            # Plot B matrix
-            B_data = Bs[name][i]
-            if all_perm_indices is not None:
-                B_data = B_data[all_perm_indices[name][i], :]
-            B_data = B_data.detach().cpu().numpy()
-            im = axs[2 * j + 1, i].matshow(B_data, aspect="auto", cmap="coolwarm")
-            if i == 0:
-                axs[2 * j + 1, i].set_ylabel("Component index")
-            axs[2 * j + 1, i].set_xlabel("d_out index")
-            axs[2 * j + 1, i].set_title(f"{name} (B matrix)")
-            images.append(im)
-
-    # Add unified colorbar
-    all_matrices = list(As.values()) + list(Bs.values())
-    norm = plt.Normalize(
-        vmin=min(M.min().item() for M in all_matrices),
-        vmax=max(M.max().item() for M in all_matrices),
-    )
-    for im in images:
-        im.set_norm(norm)
-    fig.colorbar(images[0], ax=axs.ravel().tolist())
-    return fig
-
-
 def create_embed_mask_sample_table(
     masks: dict[str, Float[Tensor, "... m"]],
 ) -> wandb.Table | None:
@@ -426,3 +348,32 @@ def plot_mean_component_activation_counts(
     fig.tight_layout()
 
     return fig
+
+
+def plot_mask_histograms(
+    masks: dict[str, Float[Tensor, "... m"]],
+    bins: int = 100,
+) -> dict[str, plt.Figure]:
+    """Plot histograms of mask values for each layer.
+
+    Args:
+        masks: Dictionary of masks for each component.
+        bins: Number of bins for the histogram.
+
+    Returns:
+        Dictionary mapping layer names to histogram figures.
+    """
+    fig_dict = {}
+
+    for layer_name, layer_mask in masks.items():
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.hist(layer_mask.flatten().cpu().numpy(), bins=bins)
+        ax.set_title(f"Mask values for {layer_name}")
+        ax.set_xlabel("Mask value")
+        # Use a log scale
+        ax.set_yscale("log")
+        ax.set_ylabel("Frequency")
+
+        fig_dict[f"mask_vals_{layer_name}"] = fig
+
+    return fig_dict

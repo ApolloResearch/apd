@@ -86,7 +86,7 @@ def calc_component_acts(
 
 
 def calc_mask_l_zero(
-    masks: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
+    masks: dict[str, Float[Tensor, "... m"]],
     cutoff: float = 1e-2,
 ) -> dict[str, float]:
     """Calculate the L0 loss on the masks, summed over the m dimension."""
