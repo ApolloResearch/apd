@@ -66,9 +66,12 @@ class ComponentModel(nn.Module):
     def create_target_components(self, target_module_patterns: list[str], m: int) -> nn.ModuleDict:
         """Create target components for the model."""
         components: dict[str, LinearComponent | EmbeddingComponent] = {}
+        matched_patterns: set[str] = set()
+
         for name, module in self.model.named_modules():
             for pattern in target_module_patterns:
                 if fnmatch.fnmatch(name, pattern):
+                    matched_patterns.add(pattern)
                     if isinstance(module, nn.Linear):
                         d_out, d_in = module.weight.shape
                         # Replace "." with "-" in the name to avoid issues with module dict keys
@@ -87,6 +90,14 @@ class ComponentModel(nn.Module):
                             f"nn.Embedding. Found type: {type(module)}"
                         )
                     break
+
+        unmatched_patterns = set(target_module_patterns) - matched_patterns
+        if unmatched_patterns:
+            raise ValueError(
+                f"The following patterns in target_module_patterns did not match any modules: "
+                f"{sorted(unmatched_patterns)}"
+            )
+
         if not components:
             raise ValueError(
                 f"No modules found matching target_module_patterns: {target_module_patterns}"
