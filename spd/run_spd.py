@@ -168,7 +168,7 @@ def optimize(
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
-        masks, relud_masks = calc_masks(
+        masks, sparsity_masks = calc_masks(
             gates=gates, target_component_acts=target_component_acts, detach_inputs=False
         )
         for layer_name, mask in masks.items():
@@ -252,14 +252,17 @@ def optimize(
             loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
 
         ####### lp sparsity loss #######
-        lp_sparsity_loss = calc_lp_sparsity_loss(relud_masks=relud_masks, pnorm=config.pnorm)
+        lp_sparsity_loss = calc_lp_sparsity_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)
         total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
         loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
 
         ####### Schatten loss #######
         if config.schatten_coeff is not None:
             schatten_loss = calc_schatten_loss(
-                relud_masks=relud_masks, pnorm=config.pnorm, components=components, device=device
+                sparsity_masks=sparsity_masks,
+                pnorm=config.pnorm,
+                components=components,
+                device=device,
             )
             total_loss += config.schatten_coeff * schatten_loss
             loss_terms["loss/schatten_loss"] = schatten_loss.item()

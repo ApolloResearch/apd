@@ -59,7 +59,7 @@ def calc_embedding_recon_loss(
 
 
 def calc_schatten_loss(
-    relud_masks: dict[str, Float[Tensor, "... m"]],
+    sparsity_masks: dict[str, Float[Tensor, "... m"]],
     pnorm: float,
     components: dict[str, LinearComponent | EmbeddingComponent],
     device: str,
@@ -67,16 +67,16 @@ def calc_schatten_loss(
     """Calculate the Schatten loss on the active components.
 
     The Schatten loss is calculated as:
-        L = Σ_{components} mean(relu_mask^pnorm · (||A||_2^2 + ||B||_2^2))
+        L = Σ_{components} mean(sparsity_mask^pnorm · (||A||_2^2 + ||B||_2^2))
 
     where:
-        - relu_mask is the activation mask for each component
+        - sparsity_mask is the activation mask for each component
         - pnorm is the power to raise the mask to
         - A and B are the component matrices
         - ||·||_2 is the L2 norm
 
     Args:
-        relud_masks: Dictionary of relu masks for each layer.
+        sparsity_masks: Dictionary of sparsity masks for each layer.
         pnorm: The pnorm to use for the sparsity loss. Must be positive.
         components: Dictionary of components for each layer.
         device: The device to compute the loss on.
@@ -91,28 +91,28 @@ def calc_schatten_loss(
         B_norms = component.B.square().sum(dim=-1)
         schatten_norms = A_norms + B_norms
         loss = einops.einsum(
-            relud_masks[component_name] ** pnorm, schatten_norms, "... m, m -> ..."
+            sparsity_masks[component_name] ** pnorm, schatten_norms, "... m, m -> ..."
         )
         total_loss += loss.mean()
     return total_loss
 
 
 def calc_lp_sparsity_loss(
-    relud_masks: dict[str, Float[Tensor, "... m"]], pnorm: float
+    sparsity_masks: dict[str, Float[Tensor, "... m"]], pnorm: float
 ) -> Float[Tensor, ""]:
     """Calculate the Lp sparsity loss on the attributions.
 
     Args:
-        relud_masks: Dictionary of relu masks for each layer.
+        sparsity_masks: Dictionary of sparsity masks for each layer.
         pnorm: The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss.
     """
     # Initialize with zeros matching the shape of first mask
-    total_loss = torch.zeros_like(next(iter(relud_masks.values())))
+    total_loss = torch.zeros_like(next(iter(sparsity_masks.values())))
 
-    for layer_relud_mask in relud_masks.values():
-        total_loss = total_loss + layer_relud_mask**pnorm
+    for layer_sparsity_mask in sparsity_masks.values():
+        total_loss = total_loss + layer_sparsity_mask**pnorm
 
     # Sum over the m dimension and mean over the other dimensions
     return total_loss.sum(dim=-1).mean()

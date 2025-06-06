@@ -107,7 +107,7 @@ def resid_mlp_plot_results_fn(
 ) -> dict[str, plt.Figure]:
     fig_dict = {}
 
-    fig_dict["masks"], all_perm_indices = plot_mask_vals(
+    masks_fig, sparsity_masks_fig, all_perm_indices_sparsity_masks = plot_mask_vals(
         model=model,
         components=components,
         gates=gates,
@@ -115,8 +115,12 @@ def resid_mlp_plot_results_fn(
         device=device,
         input_magnitude=0.75,
     )
+    fig_dict["masks"] = masks_fig
+    fig_dict["sparsity_masks"] = sparsity_masks_fig
+
+    # Use sparsity masks permutation for AB matrices (this was the original behavior)
     fig_dict["AB_matrices"] = plot_AB_matrices(
-        components=components, all_perm_indices=all_perm_indices
+        components=components, all_perm_indices=all_perm_indices_sparsity_masks
     )
     return fig_dict
 

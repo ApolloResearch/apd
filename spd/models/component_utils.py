@@ -24,17 +24,17 @@ def calc_masks(
         component_acts: The activations after each subnetwork in the SPD model.
         detach_inputs: Whether to detach the inputs to the gates.
     Returns:
-        Dictionary of masks for each layer.
+        Tuple of (masks, sparsity_masks) dictionaries for each layer.
     """
     masks = {}
-    relud_masks = {}
+    sparsity_masks = {}
     for layer_name in gates:
         gate_input = target_component_acts[layer_name]
         if detach_inputs:
             gate_input = gate_input.detach()
         masks[layer_name] = gates[layer_name].forward(gate_input)
-        relud_masks[layer_name] = gates[layer_name].forward_unclamped(gate_input)
-    return masks, relud_masks
+        sparsity_masks[layer_name] = gates[layer_name].forward_unclamped(gate_input)
+    return masks, sparsity_masks
 
 
 def calc_random_masks(
@@ -132,7 +132,7 @@ def component_activation_statistics(
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
-        masks, relud_masks = calc_masks(
+        masks, sparsity_masks = calc_masks(
             gates=gates,
             target_component_acts=target_component_acts,
             detach_inputs=False,

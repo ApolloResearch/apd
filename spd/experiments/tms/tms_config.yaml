@@ -1,4 +1,54 @@
-# TMS 5-2
+# # TMS 5-2
+# # --- WandB ---
+# wandb_project: spd-tms
+# wandb_run_name: null
+# wandb_run_name_prefix: ""
+
+# # --- General ---
+# unit_norm_matrices: false
+# seed: 0
+# m: 20
+# n_random_masks: 1
+# n_gate_hidden_neurons: 16
+# # n_gate_hidden_neurons: null
+# # target_module_patterns: ["linear1", "linear2"]
+# target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
+
+# # --- Loss Coefficients ---
+# param_match_coeff: 1.0
+# masked_recon_coeff: null
+# random_mask_recon_coeff: 1
+# layerwise_recon_coeff: null
+# layerwise_random_recon_coeff: 1.0
+# lp_sparsity_coeff: 3e-3
+# pnorm: 1.0
+# output_loss_type: mse
+
+# # --- Training ---
+# batch_size: 4096
+# steps: 40_000
+# lr: 1e-3
+# lr_schedule: cosine
+# lr_warmup_pct: 0.0
+# n_eval_steps: 100
+
+# # --- Logging & Saving ---
+# image_freq: 5_000
+# print_freq: 1000
+# save_freq: null
+
+# # --- Pretrained model info ---
+# pretrained_model_class: "spd.experiments.tms.models.TMSModel"
+# # pretrained_model_path: "wandb:spd-train-tms/runs/268t0wfp"
+# pretrained_model_path: "wandb:spd-train-tms/runs/ydih8ss4" # 1 hidden w/fixed identity
+
+# # --- Task Specific ---
+# task_config:
+#   task_name: tms
+#   feature_probability: 0.05
+#   data_generation_type: "at_least_zero_active"
+
+# TMS 40-10
 # --- WandB ---
 wandb_project: spd-tms
 wandb_run_name: null
@@ -7,25 +57,29 @@ wandb_run_name_prefix: ""
 # --- General ---
 unit_norm_matrices: false
 seed: 0
-m: 20
+m: 200
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: null
+# target_module_patterns: ["linear1", "linear2"]
 target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
 # --- Loss Coefficients ---
 param_match_coeff: 1.0
 masked_recon_coeff: null
-random_mask_recon_coeff: 1
-layerwise_recon_coeff: 1e-1
-layerwise_random_recon_coeff: 1.0
-lp_sparsity_coeff: 3e-3
 pnorm: 2.0
-output_loss_type: mse
+lp_sparsity_coeff: 1e-4
+random_mask_recon_coeff: 1
+layerwise_recon_coeff: null
+layerwise_random_recon_coeff: 1.0
+output_loss_type: "mse"
 
 # --- Training ---
-batch_size: 2048
+batch_size: 4096
 steps: 40_000
+image_freq: 5_000
+print_freq: 1000
+save_freq: null
 lr: 1e-3
 lr_schedule: cosine
 lr_warmup_pct: 0.0
@@ -37,62 +91,12 @@ print_freq: 1000
 save_freq: null
 
 # --- Pretrained model info ---
-pretrained_model_class: "spd.experiments.tms.models.TMSModel"
-pretrained_model_path: "wandb:spd-train-tms/runs/egtp88sf" # 1 hidden w/fixed identity
+pretrained_model_class: "spd.experiments.tms.models.TMS"
+# pretrained_model_path: "wandb:spd-train-tms/runs/wckft4gh" # 1 hidden
+pretrained_model_path: "wandb:spd-train-tms/runs/95fmll0x" # 1 hidden w/fixed identity
 
 # --- Task Specific ---
 task_config:
   task_name: tms
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
-
-# # TMS 40-10
-# --- WandB ---
-# wandb_project: spd-tms
-# wandb_run_name: null
-# wandb_run_name_prefix: ""
-#
-# --- General ---
-# unit_norm_matrices: false
-# seed: 0
-# m: 200
-# n_random_masks: 1
-# n_gate_hidden_neurons: 16
-# # n_gate_hidden_neurons: null
-# target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
-#
-# --- Loss Coefficients ---
-# param_match_coeff: 1.0
-# masked_recon_coeff: null
-# pnorm: 2.0
-# lp_sparsity_coeff: 1e-4
-# random_mask_recon_coeff: 1
-# layerwise_recon_coeff: null
-# layerwise_random_recon_coeff: 1.0
-# output_loss_type: "mse"
-#
-# --- Training ---
-# batch_size: 2048
-# steps: 20_000
-# image_freq: 5_000
-# print_freq: 1000
-# save_freq: null
-# lr: 1e-3
-# lr_schedule: constant
-# lr_warmup_pct: 0.0
-# n_eval_steps: 100
-#
-# --- Logging & Saving ---
-# image_freq: 5_000
-# print_freq: 1000
-# save_freq: null
-
-# --- Pretrained model info ---
-# pretrained_model_class: "spd.experiments.tms.models.TMS"
-# pretrained_model_name: "wandb:spd-train-tms/runs/" # 1 hidden w/fixed identity
-
-# --- Task Specific ---
-# task_config:
-#   task_name: tms
-#   feature_probability: 0.05
-#   data_generation_type: "at_least_zero_active"

@@ -68,6 +68,64 @@ def permute_to_identity(
     return new_mask, perm_indices
 
 
+def _plot_mask_figure(
+    masks: dict[str, Float[Tensor, "batch m"]],
+    title_suffix: str,
+    colormap: str,
+    input_magnitude: float,
+    has_pos_dim: bool,
+) -> plt.Figure:
+    """Helper function to plot a single mask figure.
+
+    Args:
+        masks: Dictionary of masks to plot
+        title_suffix: String to append to titles (e.g., "masks" or "sparsity masks")
+        colormap: Matplotlib colormap name
+        input_magnitude: Input magnitude value for the title
+        has_pos_dim: Whether the masks have a position dimension
+
+    Returns:
+        The matplotlib figure
+    """
+    fig, axs = plt.subplots(
+        len(masks),
+        1,
+        figsize=(5, 5 * len(masks)),
+        constrained_layout=True,
+        squeeze=False,
+        dpi=300,
+    )
+    axs = np.array(axs)
+
+    images = []
+    for j, (mask_name, mask) in enumerate(masks.items()):
+        # mask has shape (batch, m) or (batch, pos, m)
+        mask_data = mask.detach().cpu().numpy()
+        if has_pos_dim:
+            assert mask_data.ndim == 3
+            mask_data = mask_data[:, 0, :]
+        im = axs[j, 0].matshow(mask_data, aspect="auto", cmap=colormap)
+        images.append(im)
+
+        axs[j, 0].set_xlabel("Mask index")
+        axs[j, 0].set_ylabel("Input feature index")
+        axs[j, 0].set_title(f"{mask_name} ({title_suffix})")
+
+    # Add unified colorbar
+    norm = plt.Normalize(
+        vmin=min(mask.min().item() for mask in masks.values()),
+        vmax=max(mask.max().item() for mask in masks.values()),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+
+    # Capitalize first letter of title suffix for the figure title
+    fig.suptitle(f"{title_suffix.capitalize()} - Input magnitude: {input_magnitude}")
+
+    return fig
+
+
 def plot_mask_vals(
     model: ComponentModel,
     components: dict[str, LinearComponent | EmbeddingComponent],
@@ -75,7 +133,7 @@ def plot_mask_vals(
     batch_shape: tuple[int, ...],
     device: str,
     input_magnitude: float,
-) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
+) -> tuple[plt.Figure, plt.Figure, dict[str, Float[Tensor, " m"]]]:
     """Plot the values of the mask for a batch of inputs with single active features."""
     # First, create a batch of inputs with single active features
     has_pos_dim = len(batch_shape) == 3
@@ -93,55 +151,43 @@ def plot_mask_vals(
 
     target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
-    relud_masks_raw = calc_masks(
+    masks_raw, sparsity_masks_raw = calc_masks(
         gates=gates,
         target_component_acts=target_component_acts,
         detach_inputs=False,
-    )[1]
-
-    relud_masks = {}
-    all_perm_indices = {}
-    for k, v in relud_masks_raw.items():
-        relud_masks[k], all_perm_indices[k] = permute_to_identity(mask=v)
-
-    # Create figure with better layout and sizing
-    fig, axs = plt.subplots(
-        len(relud_masks),
-        1,
-        figsize=(5, 5 * len(relud_masks)),
-        constrained_layout=True,
-        squeeze=False,
-        dpi=300,
     )
-    axs = np.array(axs)
 
-    images = []
-    for j, (mask_name, mask) in enumerate(relud_masks.items()):
-        # mask has shape (batch, m) or (batch, pos, m)
-        mask_data = mask.detach().cpu().numpy()
-        if has_pos_dim:
-            assert mask_data.ndim == 3
-            mask_data = mask_data[:, 0, :]
-        im = axs[j, 0].matshow(mask_data, aspect="auto", cmap="Reds")
-        images.append(im)
+    # Permute both mask types with their own optimal permutations
+    masks = {}
+    sparsity_masks = {}
+    all_perm_indices_sparsity_masks = {}
 
-        axs[j, 0].set_xlabel("Mask index")
-        axs[j, 0].set_ylabel("Input feature index")
-        axs[j, 0].set_title(mask_name)
+    for k in masks_raw:
+        # Compute optimal permutation for regular masks
+        masks[k], _ = permute_to_identity(mask=masks_raw[k])
+        # Compute optimal permutation for sparsity masks
+        sparsity_masks[k], all_perm_indices_sparsity_masks[k] = permute_to_identity(
+            mask=sparsity_masks_raw[k]
+        )
 
-    # Add unified colorbar
-    norm = plt.Normalize(
-        vmin=min(mask.min().item() for mask in relud_masks.values()),
-        vmax=max(mask.max().item() for mask in relud_masks.values()),
+    # Create figures using the helper function
+    masks_fig = _plot_mask_figure(
+        masks=masks,
+        title_suffix="masks",
+        colormap="Blues",
+        input_magnitude=input_magnitude,
+        has_pos_dim=has_pos_dim,
     )
-    for im in images:
-        im.set_norm(norm)
-    fig.colorbar(images[0], ax=axs.ravel().tolist())
 
-    # Add a title which shows the input magnitude
-    fig.suptitle(f"Input magnitude: {input_magnitude}")
+    sparsity_masks_fig = _plot_mask_figure(
+        masks=sparsity_masks,
+        title_suffix="sparsity masks",
+        colormap="Reds",
+        input_magnitude=input_magnitude,
+        has_pos_dim=has_pos_dim,
+    )
 
-    return fig, all_perm_indices
+    return masks_fig, sparsity_masks_fig, all_perm_indices_sparsity_masks
 
 
 def plot_subnetwork_attributions_statistics(
