@@ -2,7 +2,6 @@
 https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb
 """
 
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -34,6 +33,7 @@ class TMSTrainConfig(BaseModel):
     steps: PositiveInt
     seed: int = 0
     lr: float
+    lr_schedule: Literal["linear", "cosine", "constant"] = "linear"
     data_generation_type: Literal["at_least_zero_active", "exactly_one_active"]
     fixed_identity_hidden_layers: bool = False
     fixed_random_hidden_layers: bool = False
@@ -69,20 +69,29 @@ def train(
     model: TMSModel,
     dataloader: DatasetGeneratedDataLoader[tuple[torch.Tensor, torch.Tensor]],
     log_wandb: bool,
-    importance: float = 1.0,
-    steps: int = 5_000,
-    print_freq: int = 100,
-    lr: float = 5e-3,
-    lr_schedule: Callable[[int, int], float] = linear_lr,
+    importance: float,
+    steps: int,
+    print_freq: int,
+    lr: float,
+    lr_schedule: Literal["linear", "cosine", "constant"],
 ) -> None:
     hooks = []
+
+    if lr_schedule == "linear":
+        lr_schedule_fn = linear_lr
+    elif lr_schedule == "cosine":
+        lr_schedule_fn = cosine_decay_lr
+    elif lr_schedule == "constant":
+        lr_schedule_fn = constant_lr
+    else:
+        raise ValueError(f"Invalid lr_schedule: {lr_schedule}")
 
     opt = torch.optim.AdamW(list(model.parameters()), lr=lr)
 
     data_iter = iter(dataloader)
     with trange(steps, ncols=0) as t:
         for step in t:
-            step_lr = lr * lr_schedule(step, steps)
+            step_lr = lr * lr_schedule_fn(step, steps)
             for group in opt.param_groups:
                 group["lr"] = step_lr
             opt.zero_grad(set_to_none=True)
@@ -150,7 +159,7 @@ def plot_cosine_similarity_distribution(
         filepath: Where to save the plot
     """
     # Calculate cosine similarities
-    rows = model.linear1.weight.detach()
+    rows = model.linear1.weight.T.detach()
     rows /= rows.norm(dim=-1, keepdim=True)
     cosine_sims = einops.einsum(rows, rows, "f1 h, f2 h -> f1 f2")
     mask = ~torch.eye(rows.shape[0], device=rows.device, dtype=torch.bool)
@@ -233,6 +242,10 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
         dataloader=dataloader,
         log_wandb=config.wandb_project is not None,
         steps=config.steps,
+        importance=1.0,
+        print_freq=100,
+        lr=config.lr,
+        lr_schedule=config.lr_schedule,
     )
 
     model_path = out_dir / "tms.pth"
@@ -240,6 +253,116 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     if config.wandb_project:
         wandb.save(str(model_path), base_path=out_dir, policy="now")
     logger.info(f"Saved model to {model_path}")
+
+    # Analysis code from play.py
+    input_size = config.tms_model_config.n_features
+    test_value = 0.75
+    output_values = []
+
+    print("\nTesting representation of each input feature...")
+    print(f"Input size: {input_size}, Test value: {test_value}")
+
+    for i in range(input_size):
+        # Create batch with test_value at position i, zeros elsewhere
+        batch = torch.zeros(1, input_size, device=device)
+        batch[0, i] = test_value
+
+        # Run the model
+        with torch.no_grad():
+            out = model(batch)
+
+        # Record the output value at the same index
+        output_value = out[0, i].item()
+        output_values.append(output_value)
+
+        print(f"Input index {i}: output value = {output_value:.4f}")
+
+    # Convert to numpy for plotting
+    output_values = np.array(output_values)
+
+    # Create barplot
+    plt.figure(figsize=(12, 6))
+    bars = plt.bar(range(input_size), output_values, alpha=0.7)
+
+    # Color bars based on how well they preserve the input
+    colors = [
+        "green"
+        if abs(val - test_value) < 0.1
+        else "orange"
+        if abs(val - test_value) < 0.3
+        else "red"
+        for val in output_values
+    ]
+    for bar, color in zip(bars, colors, strict=False):
+        bar.set_color(color)
+
+    plt.xlabel("Input Feature Index")
+    plt.ylabel("Output Value at Same Index")
+    plt.title(
+        f"Feature Representation Quality\n(Input value: {test_value}, Green: good preservation, Orange: moderate, Red: poor)"
+    )
+    plt.grid(True, alpha=0.3)
+
+    # Add horizontal line at test value for reference
+    plt.axhline(
+        y=test_value, color="black", linestyle="--", alpha=0.8, label=f"Target value ({test_value})"
+    )
+    plt.legend()
+
+    # Add statistics
+    mean_output = np.mean(output_values)
+    std_output = np.std(output_values)
+    min_output = np.min(output_values)
+    max_output = np.max(output_values)
+
+    plt.text(
+        0.02,
+        0.98,
+        f"Stats:\nMean: {mean_output:.3f}\nStd: {std_output:.3f}\nMin: {min_output:.3f}\nMax: {max_output:.3f}",
+        transform=plt.gca().transAxes,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
+
+    plt.tight_layout()
+    plt.savefig(out_dir / "feature_representation_analysis.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
+    # Summary statistics
+    print("\n=== SUMMARY ===")
+    print(f"Mean output value: {mean_output:.4f}")
+    print(f"Standard deviation: {std_output:.4f}")
+    print(f"Min output value: {min_output:.4f}")
+    print(f"Max output value: {max_output:.4f}")
+    print(f"Target input value: {test_value}")
+
+    # Count how many features are well-preserved
+    well_preserved = np.sum(np.abs(output_values - test_value) < 0.1)
+    moderately_preserved = np.sum(
+        (np.abs(output_values - test_value) >= 0.1) & (np.abs(output_values - test_value) < 0.3)
+    )
+    poorly_preserved = np.sum(np.abs(output_values - test_value) >= 0.3)
+
+    print("\nFeature preservation quality:")
+    print(
+        f"Well preserved (|output - {test_value}| < 0.1): {well_preserved}/{input_size} ({100 * well_preserved / input_size:.1f}%)"
+    )
+    print(
+        f"Moderately preserved (0.1 ≤ |output - {test_value}| < 0.3): {moderately_preserved}/{input_size} ({100 * moderately_preserved / input_size:.1f}%)"
+    )
+    print(
+        f"Poorly preserved (|output - {test_value}| ≥ 0.3): {poorly_preserved}/{input_size} ({100 * poorly_preserved / input_size:.1f}%)"
+    )
+
+    # Show which features are poorly preserved
+    if poorly_preserved > 0:
+        poor_indices = np.where(np.abs(output_values - test_value) >= 0.3)[0]
+        print(f"\nPoorly preserved feature indices: {poor_indices.tolist()}")
+        print("Output values for these features:")
+        for idx in poor_indices:
+            print(
+                f"  Index {idx}: {output_values[idx]:.4f} (diff: {output_values[idx] - test_value:.4f})"
+            )
 
     if model_cfg.n_hidden == 2:
         plot_intro_diagram(model, filepath=out_dir / "polygon.png")
@@ -256,46 +379,96 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # TMS 5-2
-    config = TMSTrainConfig(
-        wandb_project="spd-train-tms",
-        tms_model_config=TMSModelConfig(
-            n_features=5,
-            n_hidden=2,
-            n_hidden_layers=1,
-            tied_weights=True,
-            device=device,
-        ),
-        feature_probability=0.05,
-        batch_size=1024,
-        steps=5000,
-        seed=0,
-        lr=5e-3,
-        data_generation_type="at_least_zero_active",
-        fixed_identity_hidden_layers=True,
-        fixed_random_hidden_layers=False,
-    )
-    # TMS 40-10
+    # NOTE: Training TMS is very finnicky, you may need to adjust hyperparams to get it working
+    # # TMS 5-2
     # config = TMSTrainConfig(
-    #     # wandb_project="spd-train-tms",
+    #     wandb_project="spd-train-tms",
+    #     tms_model_config=TMSModelConfig(
+    #         n_features=5,
+    #         n_hidden=2,
+    #         n_hidden_layers=0,
+    #         tied_weights=True,
+    #         device=device,
+    #         init_bias_to_zero=False,
+    #     ),
+    #     feature_probability=0.05,
+    #     batch_size=1024,
+    #     steps=10000,
+    #     seed=0,
+    #     lr=5e-3,
+    #     lr_schedule="constant",
+    #     data_generation_type="at_least_zero_active",
+    #     fixed_identity_hidden_layers=False,
+    #     fixed_random_hidden_layers=False,
+    # )
+    # # TMS 5-2 w/ identity
+    # config = TMSTrainConfig(
+    #     wandb_project="spd-train-tms",
+    #     tms_model_config=TMSModelConfig(
+    #         n_features=5,
+    #         n_hidden=2,
+    #         n_hidden_layers=1,
+    #         tied_weights=True,
+    #         device=device,
+    #         init_bias_to_zero=False,
+    #     ),
+    #     feature_probability=0.05,
+    #     batch_size=1024,
+    #     steps=10000,
+    #     seed=0,
+    #     lr=5e-3,
+    #     lr_schedule="constant",
+    #     data_generation_type="at_least_zero_active",
+    #     fixed_identity_hidden_layers=True,
+    #     fixed_random_hidden_layers=False,
+    # )
+    # # TMS 40-10
+    # config = TMSTrainConfig(
+    #     wandb_project="spd-train-tms",
     #     tms_model_config=TMSModelConfig(
     #         n_features=40,
     #         n_hidden=10,
     #         n_hidden_layers=0,
     #         tied_weights=True,
     #         device=device,
+    #         init_bias_to_zero=True,
     #     ),
     #     feature_probability=0.05,
     #     # feature_probability=0.02, # synced inputs
-    #     batch_size=2048,
-    #     steps=4000,
+    #     batch_size=8192,
+    #     steps=10000,
     #     seed=0,
-    #     lr=1e-3,
+    #     lr=5e-3,
+    #     lr_schedule="constant",
     #     data_generation_type="at_least_zero_active",
     #     fixed_identity_hidden_layers=False,
     #     fixed_random_hidden_layers=False,
     #     # synced_inputs=[[5, 6], [0, 2, 3]],
     # )
+    # TMS 40-10
+    config = TMSTrainConfig(
+        wandb_project="spd-train-tms",
+        tms_model_config=TMSModelConfig(
+            n_features=40,
+            n_hidden=10,
+            n_hidden_layers=1,
+            tied_weights=True,
+            device=device,
+            init_bias_to_zero=True,
+        ),
+        feature_probability=0.05,
+        # feature_probability=0.02, # synced inputs
+        batch_size=8192,
+        steps=10000,
+        seed=0,
+        lr=5e-3,
+        lr_schedule="constant",
+        data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=True,
+        fixed_random_hidden_layers=False,
+        # synced_inputs=[[5, 6], [0, 2, 3]],
+    )
+
     set_seed(config.seed)
 
     run_train(config, device)
