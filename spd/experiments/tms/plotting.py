@@ -106,7 +106,7 @@ class TMSAnalyzer:
     ) -> tuple[Float[Tensor, "n_subnets n_features n_hidden"], npt.NDArray[np.int32], int]:
         """Filter subnets based on norm threshold."""
         # Calculate norms and sum across features dimension
-        subnet_feature_norms = subnets.norm(dim=2).sum(1)
+        subnet_feature_norms = subnets.norm(dim=-1).sum(-1)
         subnet_feature_norms_order = subnet_feature_norms.argsort(descending=True)
 
         # Reorder subnets by norm
@@ -213,7 +213,6 @@ class NetworkDiagramPlotter:
 
         # Take absolute values for visualization
         subnets_abs = subnets.abs()
-        max_weights = subnets_abs.amax(dim=(1, 2))
 
         axs = np.atleast_1d(np.array(axs))
         self._add_labels(axs[0])
@@ -225,7 +224,7 @@ class NetworkDiagramPlotter:
             self._plot_single_network(
                 ax,
                 subnets_abs[subnet_idx].cpu().detach().numpy(),
-                max_weights[subnet_idx].item(),
+                subnets_abs.max().item(),
                 n_features,
                 n_hidden,
                 cmap,
@@ -462,7 +461,7 @@ class FullNetworkDiagramPlotter:
                 "title": "Target model",
                 "linear1_weights": target_model.linear1.weight.T.detach().cpu().numpy(),
                 "hidden_weights": [
-                    target_model.hidden_layers[i].weight.detach().cpu().numpy()
+                    target_model.hidden_layers[i].weight.T.detach().cpu().numpy()
                     for i in range(target_model.config.n_hidden_layers)
                 ]
                 if target_model.config.n_hidden_layers > 0
@@ -775,7 +774,7 @@ class HiddenLayerPlotter:
         hidden_weights = hidden_weights[order]
 
         # Get target weights
-        target_weights = target_model.hidden_layers[0].weight.unsqueeze(0).detach().cpu()
+        target_weights = target_model.hidden_layers[0].weight.T.unsqueeze(0).detach().cpu()
 
         return hidden_weights, target_weights, order
 
@@ -969,12 +968,12 @@ def calc_mmcs_and_ml2r(model: ComponentModel, eps: float = 1e-12) -> None:
     assert isinstance(target_model, TMSModel)
     layer = model.components["linear1"]
     components_outer = torch.einsum("f C, C h -> C f h", layer.A, layer.B)
+    target_weight: Float[Tensor, "n_features n_hidden"] = target_model.linear1.weight.T
 
     cosine_sims = torch.einsum(
-        "C f h, h f -> C f",
+        "C f h, f h -> C f",
         components_outer / (torch.norm(components_outer, dim=-1, keepdim=True) + eps),
-        target_model.linear1.weight
-        / (torch.norm(target_model.linear1.weight, dim=-2, keepdim=True) + eps),
+        target_weight / (torch.norm(target_weight, dim=-1, keepdim=True) + eps),
     )
     max_cosine_sim = cosine_sims.max(dim=0).values
     print(f"Max cosine similarity:\n{max_cosine_sim}")
@@ -986,7 +985,9 @@ def calc_mmcs_and_ml2r(model: ComponentModel, eps: float = 1e-12) -> None:
         cosine_sims.max(dim=0).indices, torch.arange(target_model.config.n_features)
     ]
     # Get the norm of the target model weights
-    target_model_weights_norm = torch.norm(target_model.linear1.weight, dim=-2, keepdim=True) + eps
+    target_model_weights_norm: Float[Tensor, "n_features 1"] = (
+        torch.norm(target_model.linear1.weight.T, dim=-1, keepdim=True) + eps
+    )
     component_weights_at_max_cosine_sim_norm = torch.norm(
         component_weights_at_max_cosine_sim, dim=-1, keepdim=True
     )
