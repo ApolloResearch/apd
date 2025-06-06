@@ -35,8 +35,8 @@ class PlotConfig:
     heatmap_plot_size: tuple[float, float] = (3.4, 3)
 
     # Thresholds
-    subnet_norm_threshold: float = 0.025
-    hidden_layer_threshold: float = 0.0017
+    subnet_norm_threshold: float = 0.0281
+    hidden_layer_threshold: float = 0.009
 
     # Styling
     colormap_vectors: str = "viridis"
@@ -1003,8 +1003,8 @@ def main():
     """Main execution function."""
     # Configuration
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    run_id = "wandb:spd-tms/runs/dd6yam30"  # TMS 5-2
-    # run_id = "wandb:spd-tms/runs/mms7sxca"  # TMS 5-2 w/ identity
+    # run_id = "wandb:spd-tms/runs/dd6yam30"  # TMS 5-2
+    run_id = "wandb:spd-tms/runs/mms7sxca"  # TMS 5-2 w/ identity
     # run_id = "wandb:spd-tms/runs/pafpl0wj"  # TMS 40-10
     # run_id = "wandb:spd-tms/runs/804in6ej"  # TMS 40-10 w/ identity
     run_id_stem = run_id.split("/")[-1]
