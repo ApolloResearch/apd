@@ -61,8 +61,8 @@ m: 200
 n_random_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: null
-# target_module_patterns: ["linear1", "linear2"]
-target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
+target_module_patterns: ["linear1", "linear2"]
+# target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
 # --- Loss Coefficients ---
 param_match_coeff: 1.0
@@ -91,9 +91,9 @@ print_freq: 1000
 save_freq: null
 
 # --- Pretrained model info ---
-pretrained_model_class: "spd.experiments.tms.models.TMS"
-# pretrained_model_path: "wandb:spd-train-tms/runs/wckft4gh" # 1 hidden
-pretrained_model_path: "wandb:spd-train-tms/runs/95fmll0x" # 1 hidden w/fixed identity
+pretrained_model_class: "spd.experiments.tms.models.TMSModel"
+pretrained_model_path: "wandb:spd-train-tms/runs/wckft4gh"
+# pretrained_model_path: "wandb:spd-train-tms/runs/95fmll0x" # 1 hidden w/fixed identity
 
 # --- Task Specific ---
 task_config:
