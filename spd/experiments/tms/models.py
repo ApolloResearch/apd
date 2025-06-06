@@ -37,6 +37,8 @@ class TMSModel(nn.Module):
 
         self.linear1 = nn.Linear(config.n_features, config.n_hidden, bias=False)
         self.linear2 = nn.Linear(config.n_hidden, config.n_features, bias=True)
+        # Need to init bias to 0 to have tms work
+        self.linear2.bias.data.zero_()
 
         self.hidden_layers = None
         if config.n_hidden_layers > 0:
