@@ -964,11 +964,49 @@ class TMSPlotter:
             print(f"Mean bias: {self.analyzer.target_model.b_final.mean():.4f}")
 
 
+def calc_mmcs_and_ml2r(model: ComponentModel, eps: float = 1e-12) -> None:
+    target_model = model.model
+    assert isinstance(target_model, TMSModel)
+    layer = model.components["linear1"]
+    components_outer = torch.einsum("f C, C h -> C f h", layer.A, layer.B)
+
+    cosine_sims = torch.einsum(
+        "C f h, h f -> C f",
+        components_outer / (torch.norm(components_outer, dim=-1, keepdim=True) + eps),
+        target_model.linear1.weight
+        / (torch.norm(target_model.linear1.weight, dim=-2, keepdim=True) + eps),
+    )
+    max_cosine_sim = cosine_sims.max(dim=0).values
+    print(f"Max cosine similarity:\n{max_cosine_sim}")
+    print(f"Mean max cosine similarity: {max_cosine_sim.mean()}")
+    print(f"std max cosine similarity: {max_cosine_sim.std()}")
+
+    # Get the component weights at the max cosine similarity
+    component_weights_at_max_cosine_sim: Float[Tensor, "n_features n_hidden"] = components_outer[
+        cosine_sims.max(dim=0).indices, torch.arange(target_model.config.n_features)
+    ]
+    # Get the norm of the target model weights
+    target_model_weights_norm = torch.norm(target_model.linear1.weight, dim=-2, keepdim=True) + eps
+    component_weights_at_max_cosine_sim_norm = torch.norm(
+        component_weights_at_max_cosine_sim, dim=-1, keepdim=True
+    )
+    # Divide the component weights by the target model weights ratio
+    l2_ratio = component_weights_at_max_cosine_sim_norm / target_model_weights_norm
+    print(f"Mean L2 ratio: {l2_ratio.mean()}")
+    print(f"std L2 ratio: {l2_ratio.std()}")
+
+    # Mean bias
+    print(f"Mean bias: {target_model.linear2.bias.mean()}")
+
+
 def main():
     """Main execution function."""
     # Configuration
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    run_id = "wandb:spd-tms/runs/trnk43c7"  # TMS 5-2 with identity
+    run_id = "wandb:spd-tms/runs/dd6yam30"  # TMS 5-2
+    # run_id = "wandb:spd-tms/runs/mms7sxca"  # TMS 5-2 w/ identity
+    # run_id = "wandb:spd-tms/runs/pafpl0wj"  # TMS 40-10
+    # run_id = "wandb:spd-tms/runs/804in6ej"  # TMS 40-10 w/ identity
     run_id_stem = run_id.split("/")[-1]
 
     # Setup output directory
@@ -977,9 +1015,10 @@ def main():
 
     # Load models
     model, config, _ = ComponentModel.from_pretrained(run_id)
-    # target_model, _ = TMSModel.from_pretrained(config.pretrained_model_path)
     target_model = model.model
     assert isinstance(target_model, TMSModel)
+
+    calc_mmcs_and_ml2r(model)
 
     # Create plotter
     plotter = TMSPlotter(comp_model=model, target_model=target_model)
