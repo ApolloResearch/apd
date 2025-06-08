@@ -19,7 +19,7 @@ from spd.models.components import (
     GateMLP,
     LinearComponent,
 )
-from spd.types import WANDB_PATH_PREFIX, ModelPath
+from spd.spd_types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import load_pretrained
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
 

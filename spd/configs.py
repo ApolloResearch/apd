@@ -13,7 +13,7 @@ from pydantic import (
 )
 
 from spd.log import logger
-from spd.types import ModelPath, Probability
+from spd.spd_types import ModelPath, Probability
 
 
 class TMSTaskConfig(BaseModel):

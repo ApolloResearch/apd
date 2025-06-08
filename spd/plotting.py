@@ -107,7 +107,10 @@ def _plot_mask_figure(
         im = axs[j, 0].matshow(mask_data, aspect="auto", cmap=colormap)
         images.append(im)
 
-        axs[j, 0].set_xlabel("Mask index")
+        # Move x-axis ticks to bottom
+        axs[j, 0].xaxis.tick_bottom()
+        axs[j, 0].xaxis.set_label_position("bottom")
+        axs[j, 0].set_xlabel("Subcomponent index")
         axs[j, 0].set_ylabel("Input feature index")
         axs[j, 0].set_title(f"{mask_name} ({title_suffix})")
 
@@ -131,10 +134,26 @@ def plot_mask_vals(
     components: dict[str, LinearComponent | EmbeddingComponent],
     gates: dict[str, Gate | GateMLP],
     batch_shape: tuple[int, ...],
-    device: str,
+    device: str | torch.device,
     input_magnitude: float,
-) -> tuple[plt.Figure, plt.Figure, dict[str, Float[Tensor, " m"]]]:
-    """Plot the values of the mask for a batch of inputs with single active features."""
+    plot_regular_masks: bool = True,
+) -> tuple[dict[str, plt.Figure], dict[str, Float[Tensor, " m"]]]:
+    """Plot the values of the mask for a batch of inputs with single active features.
+
+    Args:
+        model: The ComponentModel
+        components: Dictionary of components
+        gates: Dictionary of gates
+        batch_shape: Shape of the batch
+        device: Device to use
+        input_magnitude: Magnitude of input features
+        plot_regular_masks: Whether to plot the regular masks (blue plots)
+
+    Returns:
+        Tuple of:
+            - Dictionary of figures with keys 'masks' (if plot_regular_masks=True) and 'sparsity_masks'
+            - Dictionary of permutation indices for sparsity masks
+    """
     # First, create a batch of inputs with single active features
     has_pos_dim = len(batch_shape) == 3
     n_features = batch_shape[-1]
@@ -170,15 +189,21 @@ def plot_mask_vals(
             mask=sparsity_masks_raw[k]
         )
 
-    # Create figures using the helper function
-    masks_fig = _plot_mask_figure(
-        masks=masks,
-        title_suffix="masks",
-        colormap="Blues",
-        input_magnitude=input_magnitude,
-        has_pos_dim=has_pos_dim,
-    )
+    # Create figures dictionary
+    figures = {}
 
+    # Create masks figure only if requested
+    if plot_regular_masks:
+        masks_fig = _plot_mask_figure(
+            masks=masks,
+            title_suffix="masks",
+            colormap="Blues",
+            input_magnitude=input_magnitude,
+            has_pos_dim=has_pos_dim,
+        )
+        figures["masks"] = masks_fig
+
+    # Always create sparsity masks figure
     sparsity_masks_fig = _plot_mask_figure(
         masks=sparsity_masks,
         title_suffix="sparsity masks",
@@ -186,8 +211,9 @@ def plot_mask_vals(
         input_magnitude=input_magnitude,
         has_pos_dim=has_pos_dim,
     )
+    figures["sparsity_masks"] = sparsity_masks_fig
 
-    return masks_fig, sparsity_masks_fig, all_perm_indices_sparsity_masks
+    return figures, all_perm_indices_sparsity_masks
 
 
 def plot_subnetwork_attributions_statistics(

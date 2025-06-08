@@ -10,7 +10,7 @@ from spd.log import logger
 from spd.models.component_model import ComponentModel
 from spd.models.component_utils import component_activation_statistics
 from spd.plotting import plot_mean_component_activation_counts
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 
 
 def main(path: ModelPath) -> None:

@@ -25,7 +25,7 @@ from spd.log import logger
 from spd.models.component_model import ComponentModel
 from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.run_spd import calc_component_acts, calc_masks
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 
 DEFAULT_MODEL_PATH: ModelPath = "wandb:spd-lm/runs/151bsctx"
 

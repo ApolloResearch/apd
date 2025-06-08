@@ -10,7 +10,7 @@ from spd.experiments.resid_mlp.models import ResidualMLP
 from spd.models.component_model import ComponentModel
 from spd.models.components import LinearComponent
 from spd.settings import REPO_ROOT
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 from spd.utils import set_seed
 
 

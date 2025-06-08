@@ -15,7 +15,7 @@ from wandb.apis.public import Run
 
 from spd.log import logger
 from spd.module_utils import init_param_
-from spd.types import WANDB_PATH_PREFIX, ModelPath
+from spd.spd_types import WANDB_PATH_PREFIX, ModelPath
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
 
 

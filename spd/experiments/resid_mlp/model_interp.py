@@ -16,7 +16,7 @@ from spd.experiments.resid_mlp.plotting import (
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
 from spd.settings import REPO_ROOT
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 from spd.utils import set_seed
 
 # %% Load model and config

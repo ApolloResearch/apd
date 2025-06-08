@@ -16,7 +16,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 
 from spd.log import logger
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 
 T = TypeVar("T", bound=BaseModel)
 
