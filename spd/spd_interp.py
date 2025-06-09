@@ -2,6 +2,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 
+from spd.configs import Config
 from spd.experiments.resid_mlp.models import ResidualMLP
 from spd.experiments.tms.models import TMSModel
 from spd.models.component_model import ComponentModel
@@ -86,6 +87,7 @@ def plot_increasing_sparsity_masks(
         extraction_result = extract_sparsity_masks(run_id, input_magnitude)
         figures = extraction_result["figures"]
         config = extraction_result["config"]
+        assert isinstance(config, Config)
 
         # Extract sparsity mask data from the figure
         sparsity_fig = figures["sparsity_masks"]
@@ -108,7 +110,7 @@ def plot_increasing_sparsity_masks(
 
         all_mask_data[run_id] = {
             "mask_data": mask_data,
-            "lp_sparsity_coeff": config.lp_sparsity_coeff,
+            "importance_loss_coeff": config.importance_loss_coeff,
         }
         plt.close(sparsity_fig)  # Close the individual figure
 
@@ -160,8 +162,8 @@ def plot_increasing_sparsity_masks(
             ax.xaxis.set_label_position("bottom")
 
             if row_idx == 0:
-                # Add lp_sparsity_coeff as column title
-                lp_coeff = all_mask_data[run_id]["lp_sparsity_coeff"]
+                # Add importance_loss_coeff as column title
+                lp_coeff = all_mask_data[run_id]["importance_loss_coeff"]
                 title_text = f"Importance coeff={lp_coeff:.0e}"
 
                 # Add "BEST" indicator if this is one of the best runs

@@ -9,7 +9,7 @@ parameters:
     # values: [1e-2]
   # masked_recon_coeff:
   #   values: [1e-1, 1e-2]
-  lp_sparsity_coeff:
+  importance_loss_coeff:
     # values: [1e-5, 7e-6, 3e-6, 1e-6, 7e-7, 3e-7, 1e-7]
     values: [1e-4, 1e-5, 1e-6, 1e-7]
     # values: [1e-5]

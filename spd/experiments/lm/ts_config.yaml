@@ -20,7 +20,7 @@ masked_recon_coeff: null
 random_stochastic_recon_coeff: null
 layerwise_recon_coeff: null
 layerwise_stochastic_recon_coeff: 1
-lp_sparsity_coeff: 1e-6
+importance_loss_coeff: 1e-6
 schatten_coeff: null
 # embedding_recon_coeff: 1
 embedding_recon_coeff: null

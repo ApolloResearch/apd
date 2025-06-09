@@ -144,9 +144,9 @@ class Config(BaseModel):
         default=None,
         description="Coefficient for per-layer reconstruction loss with stochastic masks",
     )
-    lp_sparsity_coeff: NonNegativeFloat = Field(
+    importance_loss_coeff: NonNegativeFloat = Field(
         ...,
-        description="Coefficient for L_p sparsity penalty applied to the gating activations",
+        description="Coefficient for importance loss",
     )
     schatten_coeff: NonNegativeFloat | None = Field(
         default=None,
@@ -267,16 +267,12 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def validate_model(self) -> Self:
-        # Warn if neither masked_recon_coeff nor lp_sparsity_coeff is set
-        if not self.masked_recon_coeff and not self.lp_sparsity_coeff:
-            logger.warning("Neither masked_recon_coeff nor lp_sparsity_coeff is set")
-
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"
         if self.masked_recon_coeff == 0:
             logger.warning(f"masked_recon_coeff {msg}")
-        if self.lp_sparsity_coeff == 0:
-            logger.warning(f"lp_sparsity_coeff {msg}")
+        if self.importance_loss_coeff == 0:
+            logger.warning(f"importance_loss_coeff {msg}")
         if self.param_match_coeff == 0:
             logger.warning(f"param_match_coeff {msg}")
 

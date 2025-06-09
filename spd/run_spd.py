@@ -19,8 +19,8 @@ from spd.configs import Config
 from spd.log import logger
 from spd.losses import (
     calc_embedding_recon_loss,
+    calc_importance_loss,
     calc_layerwise_recon_loss,
-    calc_lp_sparsity_loss,
     calc_masked_recon_loss,
     calc_param_match_loss,
     calc_schatten_loss,
@@ -56,7 +56,7 @@ def get_common_run_name_suffix(config: Config) -> str:
     if config.stochastic_mask_recon_coeff is not None:
         run_suffix += f"randrecon{config.stochastic_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
-    run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
+    run_suffix += f"lpsp{config.importance_loss_coeff:.2e}_"
     run_suffix += f"C{config.C}_"
     run_suffix += f"sd{config.seed}_"
     run_suffix += f"lr{config.lr:.2e}_"
@@ -255,10 +255,10 @@ def optimize(
                 layerwise_stochastic_recon_loss.item()
             )
 
-        ####### lp sparsity loss #######
-        lp_sparsity_loss = calc_lp_sparsity_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)
-        total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
-        loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
+        ####### importance loss #######
+        importance_loss = calc_importance_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)
+        total_loss += config.importance_loss_coeff * importance_loss
+        loss_terms["loss/importance_loss"] = importance_loss.item()
 
         ####### Schatten loss #######
         if config.schatten_coeff is not None:

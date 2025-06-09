@@ -13,7 +13,6 @@ def leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
 
 
 def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
-    """Small slope in the positive and negative regions."""
     # TODO: Make more memory efficient
     return torch.where(x > 1, 1 + alpha * (x - 1), F.relu(x))
 

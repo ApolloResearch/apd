@@ -97,7 +97,7 @@ def calc_schatten_loss(
     return total_loss
 
 
-def calc_lp_sparsity_loss(
+def calc_importance_loss(
     sparsity_masks: dict[str, Float[Tensor, "... C"]], pnorm: float
 ) -> Float[Tensor, ""]:
     """Calculate the Lp sparsity loss on the attributions.
