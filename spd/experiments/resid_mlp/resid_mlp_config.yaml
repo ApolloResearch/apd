@@ -50,7 +50,7 @@ task_config:
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
 
-# ########## 2 layer ##########
+# ########## 2 layers ##########
 # # --- WandB ---
 # wandb_project: spd-resid-mlp
 # wandb_run_name: null
@@ -101,7 +101,7 @@ task_config:
 #   feature_probability: 0.01
 #   data_generation_type: "at_least_zero_active"
 
-# ########## 3 layer ##########
+# ########## 3 layers ##########
 # # --- WandB ---
 # wandb_project: spd-resid-mlp
 # wandb_run_name: null
@@ -112,7 +112,7 @@ task_config:
 # seed: 0
 # m: 500
 # n_random_masks: 1
-# n_gate_hidden_neurons: 32
+# n_gate_hidden_neurons: 128
 # target_module_patterns:
 #   - "layers.*.mlp_in"
 #   - "layers.*.mlp_out"
@@ -124,13 +124,13 @@ task_config:
 # random_mask_recon_coeff: 1.0
 # layerwise_recon_coeff: null
 # layerwise_random_recon_coeff: 1.0
-# lp_sparsity_coeff: 1e-5
+# lp_sparsity_coeff: 5e-6
 # pnorm: 2
 # output_loss_type: mse
 
 # # --- Training ---
 # batch_size: 2048
-# steps: 100_000
+# steps: 200_000
 # lr: 1e-3
 # lr_schedule: constant
 # lr_warmup_pct: 0.00
