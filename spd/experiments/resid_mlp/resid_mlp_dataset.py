@@ -19,7 +19,7 @@ class ResidualMLPDataset(SparseFeatureDataset):
         label_type: Literal["act_plus_resid", "abs"] | None = None,
         act_fn_name: Literal["relu", "gelu"] | None = None,
         label_fn_seed: int | None = None,
-        label_coeffs: Float[Tensor, "n_instances n_features"] | None = None,
+        label_coeffs: Float[Tensor, " n_features"] | None = None,
         data_generation_type: Literal[
             "exactly_one_active", "exactly_two_active", "at_least_zero_active"
         ] = "at_least_zero_active",

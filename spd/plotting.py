@@ -1,6 +1,5 @@
 import math
 
-import einops
 import matplotlib.ticker as tkr
 import numpy as np
 import torch
@@ -24,46 +23,33 @@ from spd.models.components import (
 def permute_to_identity(
     mask: Float[Tensor, "batch m"],
 ) -> tuple[Float[Tensor, "batch m"], Float[Tensor, " m"]]:
-    """Returns (permuted_mask, permutation_indices)."""
+    """Permute matrix to make it as close to identity as possible.
 
-    original_shape = mask.shape
-    if mask.ndim == 2:
-        # Add instance dimension: (batch, m) -> (batch, 1, m)
-        mask = mask.unsqueeze(1)
-        batch, n_instances, m = mask.shape
-        assert n_instances == 1
-    elif mask.ndim == 3:
-        batch, n_instances, m = mask.shape
-    else:
-        raise ValueError(f"Mask must have 2 or 3 dimensions, got {mask.ndim}")
+    Returns:
+        - Permuted mask
+        - Permutation indices
+    """
 
+    if mask.ndim != 2:
+        raise ValueError(f"Mask must have 2 dimensions, got {mask.ndim}")
+
+    batch, m = mask.shape
     new_mask = mask.clone()
     effective_rows = min(batch, m)
-    # Store permutation indices for each instance
-    perm_indices = torch.zeros((n_instances, m), dtype=torch.long, device=mask.device)
+    perm_indices = torch.zeros(m, dtype=torch.long, device=mask.device)
 
-    for inst in range(n_instances):
-        mat: Tensor = mask[:, inst, :]
-        perm: list[int] = [0] * m
-        used: set[int] = set()
-        for i in range(effective_rows):
-            sorted_indices: list[int] = torch.argsort(mat[i, :], descending=True).tolist()
-            chosen: int = next(
-                (col for col in sorted_indices if col not in used), sorted_indices[0]
-            )
-            perm[i] = chosen
-            used.add(chosen)
-        remaining: list[int] = sorted(list(set(range(m)) - used))
-        for idx, col in enumerate(remaining):
-            perm[effective_rows + idx] = col
-        new_mask[:, inst, :] = mat[:, perm]
-        perm_indices[inst] = torch.tensor(perm, device=mask.device)
-
-    # Return in original shape
-    if len(original_shape) == 2:
-        # Remove instance dimension: (batch, 1, m) -> (batch, m)
-        new_mask = new_mask.squeeze(1)
-        perm_indices = perm_indices.squeeze(0)  # (1, m) -> (m)
+    perm: list[int] = [0] * m
+    used: set[int] = set()
+    for i in range(effective_rows):
+        sorted_indices: list[int] = torch.argsort(mask[i, :], descending=True).tolist()
+        chosen: int = next((col for col in sorted_indices if col not in used), sorted_indices[0])
+        perm[i] = chosen
+        used.add(chosen)
+    remaining: list[int] = sorted(list(set(range(m)) - used))
+    for idx, col in enumerate(remaining):
+        perm[effective_rows + idx] = col
+    new_mask = mask[:, perm]
+    perm_indices = torch.tensor(perm, device=mask.device)
 
     return new_mask, perm_indices
 
@@ -217,47 +203,37 @@ def plot_mask_vals(
 
 
 def plot_subnetwork_attributions_statistics(
-    mask: Float[Tensor, "batch_size n_instances m"],
+    mask: Float[Tensor, "batch_size m"],
 ) -> dict[str, plt.Figure]:
-    """Plot vertical bar charts of the number of active subnetworks over the batch for each instance."""
+    """Plot a vertical bar chart of the number of active subnetworks over the batch."""
     batch_size = mask.shape[0]
-    if mask.ndim == 2:
-        n_instances = 1
-        mask = einops.repeat(mask, "batch m -> batch n_instances m", n_instances=1)
-    else:
-        n_instances = mask.shape[1]
+    if mask.ndim != 2:
+        raise ValueError(f"Mask must have 2 dimensions, got {mask.ndim}")
 
-    fig, axs = plt.subplots(
-        ncols=n_instances, nrows=1, figsize=(5 * n_instances, 5), constrained_layout=True
-    )
+    # Sum over subnetworks for each batch entry
+    values = mask.sum(dim=1).cpu().detach().numpy()
+    bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
+    counts, _ = np.histogram(values, bins=bins)
 
-    axs = np.array([axs]) if n_instances == 1 else np.array(axs)
-    for i, ax in enumerate(axs):
-        values = mask[:, i].sum(dim=1).cpu().detach().numpy()
-        bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
-        counts, _ = np.histogram(values, bins=bins)
-        bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
-        ax.set_xticks(bins[:-1])
-        ax.set_xticklabels([str(b) for b in bins[:-1]])
+    fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+    bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
+    ax.set_xticks(bins[:-1])
+    ax.set_xticklabels([str(b) for b in bins[:-1]])
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Number of active subnetworks")
+    ax.set_title("Active subnetworks on current batch")
 
-        # Only add y-label to first subplot
-        if i == 0:
-            ax.set_ylabel("Count")
-
-        ax.set_xlabel("Number of active subnetworks")
-        ax.set_title(f"Instance {i + 1}")
-
-        # Add value annotations on top of each bar
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(
-                f"{height}",
-                xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3),  # 3 points vertical offset
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-            )
+    # Add value annotations on top of each bar
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(
+            f"{height}",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 3),  # 3 points vertical offset
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+        )
 
     fig.suptitle(f"Active subnetworks on current batch (batch_size={batch_size})")
     return {"subnetwork_attributions_statistics": fig}
@@ -299,7 +275,7 @@ def plot_matrix(
 
 def plot_AB_matrices(
     components: dict[str, LinearComponent | EmbeddingComponent],
-    all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
+    all_perm_indices: dict[str, Float[Tensor, " m"]] | None = None,
 ) -> plt.Figure:
     """Plot A and B matrices for each instance, grouped by layer."""
     As = {k: v.A for k, v in components.items()}

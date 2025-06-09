@@ -38,9 +38,9 @@ def calc_masks(
 
 
 def calc_random_masks(
-    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    masks: dict[str, Float[Tensor, "batch m"]],
     n_random_masks: int,
-) -> list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]]:
+) -> list[dict[str, Float[Tensor, "batch m"]]]:
     """Calculate n_random_masks random masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
 
     Args:

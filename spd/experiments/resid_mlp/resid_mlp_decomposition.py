@@ -7,7 +7,6 @@ from typing import Any
 
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import wandb
 import yaml
@@ -51,52 +50,6 @@ def get_run_name(
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_subnetwork_attributions(
-    attribution_scores: Float[Tensor, "batch n_instances m"],
-    out_dir: Path | None,
-    step: int | None,
-) -> plt.Figure:
-    """Plot subnetwork attributions."""
-    # Plot a row with n_instances
-    # Each column is a different instance
-    n_instances = attribution_scores.shape[1]
-    fig, ax = plt.subplots(
-        nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
-    )
-    axs = np.array([ax]) if n_instances == 1 else np.array(ax)
-    im = None
-    for i in range(n_instances):
-        im = axs[i].matshow(
-            attribution_scores[:, i].detach().cpu().numpy(), aspect="auto", cmap="Reds"
-        )
-        axs[i].set_xlabel("Subnetwork Index")
-        axs[i].set_ylabel("Batch Index")
-        axs[i].set_title("Subnetwork Attributions")
-
-        # Annotate each cell with the numeric value if less than 200 elements
-        if attribution_scores.shape[0] * attribution_scores.shape[-1] < 200:
-            for b in range(attribution_scores.shape[0]):
-                for j in range(attribution_scores.shape[-1]):
-                    axs[i].text(
-                        j,
-                        b,
-                        f"{attribution_scores[b, i, j]:.2f}",
-                        ha="center",
-                        va="center",
-                        color="black",
-                        fontsize=10,
-                    )
-    plt.colorbar(im)
-    if out_dir:
-        filename = (
-            f"subnetwork_attributions_s{step}.png"
-            if step is not None
-            else "subnetwork_attributions.png"
-        )
-        fig.savefig(out_dir / filename, dpi=200)
-    return fig
-
-
 def resid_mlp_plot_results_fn(
     model: ComponentModel,
     components: dict[str, LinearComponent | EmbeddingComponent],
@@ -131,7 +84,7 @@ def save_target_model_info(
     out_dir: Path,
     resid_mlp: ResidualMLP,
     resid_mlp_train_config_dict: dict[str, Any],
-    label_coeffs: Float[Tensor, " n_instances"],
+    label_coeffs: Float[Tensor, " n_features"],
 ) -> None:
     torch.save(resid_mlp.state_dict(), out_dir / "resid_mlp.pth")
 

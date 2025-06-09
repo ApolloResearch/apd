@@ -170,20 +170,13 @@ class SparseFeatureDataset(
 
         return batch
 
-    def _masked_batch_generator(
-        self, total_batch_size: int
-    ) -> Float[Tensor, "total_batch_size n_features"]:
+    def _masked_batch_generator(self, batch_size: int) -> Float[Tensor, "batch_size n_features"]:
         """Generate a batch where each feature activates independently with probability
         `feature_probability`.
-
-        Args:
-            total_batch_size: Number of samples in the batch (either `batch_size` or
-                `batch_size * n_instances`)
         """
         min_val, max_val = self.value_range
         batch = (
-            torch.rand((total_batch_size, self.n_features), device=self.device)
-            * (max_val - min_val)
+            torch.rand((batch_size, self.n_features), device=self.device) * (max_val - min_val)
             + min_val
         )
         mask = torch.rand_like(batch) < self.feature_probability
@@ -191,7 +184,7 @@ class SparseFeatureDataset(
 
     def _generate_multi_feature_batch_no_zero_samples(
         self, batch_size: int, buffer_ratio: float
-    ) -> Float[Tensor, "batch n_instances n_features"]:
+    ) -> Float[Tensor, "batch n_features"]:
         """Generate a batch where each feature activates independently with probability
         `feature_probability`.
 
@@ -199,7 +192,7 @@ class SparseFeatureDataset(
 
         Args:
             batch_size: Number of samples in the batch
-            buffer_ratio: First generate `buffer_ratio * total_batch_size` samples and count the
+            buffer_ratio: First generate `buffer_ratio * batch_size` samples and count the
                 number of samples with all zeros. Then generate another `buffer_ratio *
                 n_zeros` samples and fill in the zero samples. Continue until there are no zero
                 samples.
