@@ -279,6 +279,7 @@ if __name__ == "__main__":
         data_generation_type="at_least_zero_active",
         batch_size=2048,
         steps=1000,
+        # steps=10_000, # 2-layer and 3-layer
         print_freq=100,
         lr=3e-3,
         lr_schedule="cosine",
