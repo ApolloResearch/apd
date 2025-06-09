@@ -19,6 +19,7 @@ def test_tms_decomposition_happy_path() -> None:
         n_hidden=2,
         n_hidden_layers=1,
         tied_weights=True,
+        init_bias_to_zero=False,
         device=device,
     )
 
@@ -128,6 +129,7 @@ def test_train_tms_happy_path():
             n_hidden=2,
             n_hidden_layers=0,
             tied_weights=False,
+            init_bias_to_zero=False,
             device=device,
         ),
         feature_probability=0.1,
@@ -142,7 +144,16 @@ def test_train_tms_happy_path():
     model, dataloader = get_model_and_dataloader(config, device)
 
     # Run training
-    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
+    train(
+        model,
+        dataloader,
+        importance=1.0,
+        lr=config.lr,
+        lr_schedule=config.lr_schedule,
+        steps=config.steps,
+        print_freq=1000,
+        log_wandb=False,
+    )
 
     # The test passes if training runs without errors
     print("TMS training completed successfully")
@@ -159,6 +170,7 @@ def test_tms_train_fixed_identity():
             n_hidden=2,
             n_hidden_layers=2,
             tied_weights=False,
+            init_bias_to_zero=False,
             device=device,
         ),
         feature_probability=0.1,
@@ -179,7 +191,16 @@ def test_tms_train_fixed_identity():
     initial_hidden = model.hidden_layers[0].weight.data.clone()
     assert torch.allclose(initial_hidden, eye), "Initial hidden layer is not identity"
 
-    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
+    train(
+        model,
+        dataloader,
+        importance=1.0,
+        lr=config.lr,
+        lr_schedule=config.lr_schedule,
+        steps=config.steps,
+        print_freq=1000,
+        log_wandb=False,
+    )
 
     # Assert that the hidden layers remains identity
     assert torch.allclose(model.hidden_layers[0].weight.data, eye), "Hidden layer changed"
@@ -195,6 +216,7 @@ def test_tms_train_fixed_random():
             n_hidden=2,
             n_hidden_layers=2,
             tied_weights=False,
+            init_bias_to_zero=False,
             device=device,
         ),
         feature_probability=0.1,
@@ -211,7 +233,16 @@ def test_tms_train_fixed_random():
     assert model.hidden_layers is not None
     initial_hidden = model.hidden_layers[0].weight.data.clone()
 
-    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
+    train(
+        model,
+        dataloader,
+        importance=1.0,
+        lr=config.lr,
+        lr_schedule=config.lr_schedule,
+        steps=config.steps,
+        print_freq=1000,
+        log_wandb=False,
+    )
 
     # Assert that the hidden layers are unchanged
     assert torch.allclose(model.hidden_layers[0].weight.data, initial_hidden), (
