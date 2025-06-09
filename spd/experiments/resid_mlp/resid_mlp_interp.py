@@ -276,8 +276,8 @@ def plot_spd_feature_contributions_truncated(
         legend=False,
     )
     axes1[1].set_ylabel("Neuron contribution")
-    axes1[1].set_xlabel("Parameter component index")
-    axes1[1].set_title("Individual APD parameter components")
+    axes1[1].set_xlabel("Subcomponent index")
+    axes1[1].set_title("Individual SPD subcomponents")
     axes1[1].set_xticks(range(n_features))
 
     # Set the same y-axis limits for both plots
@@ -298,7 +298,10 @@ def main():
     set_seed(0)
     device = "cpu" if torch.cuda.is_available() else "cpu"
 
-    path_spd: ModelPath = "wandb:spd-resid-mlp/runs/9ma33jty"  # 1 layer
+    # path_spd: ModelPath = "wandb:spd-resid-mlp/runs/aswyb4eh"  # 1 layer
+    # path_spd: ModelPath = "wandb:spd-resid-mlp/runs/sakvc0ad"  # 2 layer
+    path_spd: ModelPath = "wandb:/spd-resid-mlp/runs/x57ji7oj"  # 3 layer
+
     wandb_id = path_spd.split("/")[-1]
 
     model = ComponentModel.from_pretrained(path_spd)[0]
@@ -317,7 +320,7 @@ def main():
     fig = plot_spd_feature_contributions_truncated(
         components=components,
         target_model=target_model,
-        n_features=50,
+        n_features=10,
     )
     fig.savefig(
         out_dir / f"resid_mlp_weights_{n_layers}layers_{wandb_id}.png", bbox_inches="tight", dpi=500
