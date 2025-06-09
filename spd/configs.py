@@ -110,9 +110,9 @@ class Config(BaseModel):
         ...,
         description="The number of subcomponents per layer",
     )
-    n_random_masks: PositiveInt = Field(
+    n_stochastic_masks: PositiveInt = Field(
         ...,
-        description="Number of random masks to sample when using random-mask reconstruction loss",
+        description="Number of stochastic masks to sample when using stochastic recon losses",
     )
     n_gate_hidden_neurons: PositiveInt | None = Field(
         default=None,

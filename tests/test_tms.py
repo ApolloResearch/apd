@@ -33,7 +33,7 @@ def test_tms_decomposition_happy_path() -> None:
         unit_norm_matrices=False,
         seed=0,
         C=10,  # Smaller C for faster testing
-        n_random_masks=1,
+        n_stochastic_masks=1,
         n_gate_hidden_neurons=8,
         target_module_patterns=["linear1", "linear2", "hidden_layers.0"],
         # Loss Coefficients

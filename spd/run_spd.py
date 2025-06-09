@@ -52,7 +52,7 @@ def get_common_run_name_suffix(config: Config) -> str:
     run_suffix = ""
     if config.masked_recon_coeff is not None:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
-        run_suffix += f"nrandmasks{config.n_random_masks}_"
+        run_suffix += f"nrandmasks{config.n_stochastic_masks}_"
     if config.random_mask_recon_coeff is not None:
         run_suffix += f"randrecon{config.random_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
@@ -205,7 +205,9 @@ def optimize(
 
         ####### random mask recon loss #######
         if config.random_mask_recon_coeff is not None:
-            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            random_masks = calc_random_masks(
+                masks=masks, n_stochastic_masks=config.n_stochastic_masks
+            )
             random_mask_loss = torch.tensor(0.0, device=target_out.device)
             for i in range(len(random_masks)):
                 random_mask_loss += calc_masked_recon_loss(
@@ -237,7 +239,7 @@ def optimize(
         ####### layerwise random recon loss #######
         if config.layerwise_random_recon_coeff is not None:
             layerwise_random_masks = calc_random_masks(
-                masks=masks, n_random_masks=config.n_random_masks
+                masks=masks, n_stochastic_masks=config.n_stochastic_masks
             )
             layerwise_random_recon_loss = calc_layerwise_recon_loss(
                 model=model,
@@ -286,7 +288,9 @@ def optimize(
             assert len(components) == 1, "Only one embedding component is supported"
             component = list(components.values())[0]
             assert isinstance(component, EmbeddingComponent)
-            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            random_masks = calc_random_masks(
+                masks=masks, n_stochastic_masks=config.n_stochastic_masks
+            )
             embedding_recon_loss = calc_embedding_recon_loss(
                 model=model,
                 batch=batch,

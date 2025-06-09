@@ -8,7 +8,7 @@ wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
 C: 100
-n_random_masks: 1
+n_stochastic_masks: 1
 n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
 target_module_patterns:
@@ -60,7 +60,7 @@ task_config:
 # unit_norm_matrices: false
 # seed: 0
 # C: 400
-# n_random_masks: 1
+# n_stochastic_masks: 1
 # n_gate_hidden_neurons: 16
 # target_module_patterns:
 #   - "layers.*.mlp_in"
@@ -111,7 +111,7 @@ task_config:
 # unit_norm_matrices: false
 # seed: 0
 # C: 500
-# n_random_masks: 1
+# n_stochastic_masks: 1
 # n_gate_hidden_neurons: 128
 # target_module_patterns:
 #   - "layers.*.mlp_in"
