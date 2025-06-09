@@ -41,14 +41,14 @@ def calc_random_masks(
     masks: dict[str, Float[Tensor, "batch C"]],
     n_stochastic_masks: int,
 ) -> list[dict[str, Float[Tensor, "batch C"]]]:
-    """Calculate n_stochastic_masks random masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
+    """Calculate n_stochastic_masks masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
 
     Args:
-        masks: The masks to use for the random masks.
+        masks: The masks to use for the stochastic masks.
         n_stochastic_masks: The number of stochastic masks to calculate.
 
     Return:
-        A list of n_stochastic_masks dictionaries, each containing the random masks for each layer.
+        A list of n_stochastic_masks dictionaries, each containing the stochastic masks for each layer.
     """
     stochastic_masks = []
     for _ in range(n_stochastic_masks):

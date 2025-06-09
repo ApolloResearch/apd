@@ -130,11 +130,11 @@ class Config(BaseModel):
     )
     masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for reconstruction loss with a deterministic binary mask",
+        description="Coefficient for reconstruction loss with a deterministic mask",
     )
-    random_mask_recon_coeff: NonNegativeFloat | None = Field(
+    stochastic_mask_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for reconstruction loss with random binary masks",
+        description="Coefficient for reconstruction loss with stochastic masks",
     )
     layerwise_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
@@ -142,7 +142,7 @@ class Config(BaseModel):
     )
     layerwise_random_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for per-layer reconstruction loss with random masks",
+        description="Coefficient for per-layer reconstruction loss with stochastic masks",
     )
     lp_sparsity_coeff: NonNegativeFloat = Field(
         ...,

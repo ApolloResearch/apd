@@ -8,14 +8,14 @@ wandb_run_name_prefix: ""
 seed: 0
 unit_norm_matrices: false
 C: 100
-n_random_masks: 1
+n_stochastic_masks: 1
 n_gate_hidden_neurons: null
 target_module_patterns: ["model.embed_tokens"]
 
 # --- Loss Coefficients ---
 param_match_coeff: 1.0
 masked_recon_coeff: null
-random_mask_recon_coeff: null
+random_stochastic_recon_coeff: null
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1
 lp_sparsity_coeff: 1e-6

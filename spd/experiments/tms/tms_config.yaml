@@ -17,7 +17,7 @@
 # # --- Loss Coefficients ---
 # param_match_coeff: 1.0
 # masked_recon_coeff: null
-# random_mask_recon_coeff: 1
+# random_stochastic_recon_coeff: 1
 # layerwise_recon_coeff: null
 # layerwise_random_recon_coeff: 1.0
 # lp_sparsity_coeff: 3e-3
@@ -69,7 +69,7 @@ param_match_coeff: 1.0
 masked_recon_coeff: null
 pnorm: 2.0
 lp_sparsity_coeff: 1e-4
-random_mask_recon_coeff: 1
+random_stochastic_recon_coeff: 1
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
 output_loss_type: "mse"

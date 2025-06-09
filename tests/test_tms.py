@@ -39,7 +39,7 @@ def test_tms_decomposition_happy_path() -> None:
         # Loss Coefficients
         param_match_coeff=1.0,
         masked_recon_coeff=None,
-        random_mask_recon_coeff=1.0,
+        stochastic_mask_recon_coeff=1.0,
         layerwise_recon_coeff=1e-1,
         layerwise_random_recon_coeff=1.0,
         lp_sparsity_coeff=3e-3,

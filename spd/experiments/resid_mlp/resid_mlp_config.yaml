@@ -19,7 +19,7 @@ target_module_patterns:
 param_match_coeff: 1.0
 out_recon_coeff: 0.0
 masked_recon_coeff: null
-random_mask_recon_coeff: 1.0
+random_stochastic_recon_coeff: 1.0
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
 lp_sparsity_coeff: 1e-5
@@ -70,7 +70,7 @@ task_config:
 # param_match_coeff: 1.0
 # out_recon_coeff: 0.0
 # masked_recon_coeff: null
-# random_mask_recon_coeff: 1.0
+# random_stochastic_recon_coeff: 1.0
 # layerwise_recon_coeff: null
 # layerwise_random_recon_coeff: 1.0
 # lp_sparsity_coeff: 1e-5
@@ -121,7 +121,7 @@ task_config:
 # param_match_coeff: 1.0
 # out_recon_coeff: 0.0
 # masked_recon_coeff: null
-# random_mask_recon_coeff: 1.0
+# random_stochastic_recon_coeff: 1.0
 # layerwise_recon_coeff: null
 # layerwise_random_recon_coeff: 1.0
 # lp_sparsity_coeff: 5e-6

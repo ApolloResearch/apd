@@ -53,8 +53,8 @@ def get_common_run_name_suffix(config: Config) -> str:
     if config.masked_recon_coeff is not None:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
         run_suffix += f"nrandmasks{config.n_stochastic_masks}_"
-    if config.random_mask_recon_coeff is not None:
-        run_suffix += f"randrecon{config.random_mask_recon_coeff:.2e}_"
+    if config.stochastic_mask_recon_coeff is not None:
+        run_suffix += f"randrecon{config.stochastic_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
     run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
     run_suffix += f"C{config.C}_"
@@ -204,7 +204,7 @@ def optimize(
             loss_terms["loss/masked_reconstruction"] = masked_recon_loss.item()
 
         ####### random mask recon loss #######
-        if config.random_mask_recon_coeff is not None:
+        if config.stochastic_mask_recon_coeff is not None:
             random_masks = calc_random_masks(
                 masks=masks, n_stochastic_masks=config.n_stochastic_masks
             )
@@ -219,8 +219,8 @@ def optimize(
                     loss_type=config.output_loss_type,
                 )
             random_mask_loss = random_mask_loss / len(random_masks)
-            total_loss += config.random_mask_recon_coeff * random_mask_loss
-            loss_terms["loss/random_mask_reconstruction"] = random_mask_loss.item()
+            total_loss += config.stochastic_mask_recon_coeff * random_mask_loss
+            loss_terms["loss/stochastic_mask_reconstruction"] = random_mask_loss.item()
 
         ####### layerwise recon loss #######
         if config.layerwise_recon_coeff is not None:

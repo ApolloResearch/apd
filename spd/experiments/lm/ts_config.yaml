@@ -17,7 +17,7 @@ target_module_patterns: ["transformer.h.3.mlp.c_fc"]
 # --- Loss Coefficients ---
 param_match_coeff: 1.0
 masked_recon_coeff: null
-random_mask_recon_coeff: null
+random_stochastic_recon_coeff: null
 layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1
 lp_sparsity_coeff: 1e-6
