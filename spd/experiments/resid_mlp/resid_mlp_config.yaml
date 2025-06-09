@@ -21,7 +21,7 @@ out_recon_coeff: 0.0
 masked_recon_coeff: null
 random_stochastic_recon_coeff: 1.0
 layerwise_recon_coeff: null
-layerwise_random_recon_coeff: 1.0
+layerwise_stochastic_recon_coeff: 1.0
 lp_sparsity_coeff: 1e-5
 pnorm: 2
 output_loss_type: mse
@@ -72,7 +72,7 @@ task_config:
 # masked_recon_coeff: null
 # random_stochastic_recon_coeff: 1.0
 # layerwise_recon_coeff: null
-# layerwise_random_recon_coeff: 1.0
+# layerwise_stochastic_recon_coeff: 1.0
 # lp_sparsity_coeff: 1e-5
 # pnorm: 2
 # output_loss_type: mse
@@ -123,7 +123,7 @@ task_config:
 # masked_recon_coeff: null
 # random_stochastic_recon_coeff: 1.0
 # layerwise_recon_coeff: null
-# layerwise_random_recon_coeff: 1.0
+# layerwise_stochastic_recon_coeff: 1.0
 # lp_sparsity_coeff: 5e-6
 # pnorm: 2
 # output_loss_type: mse

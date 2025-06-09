@@ -43,7 +43,7 @@ def test_resid_mlp_decomposition_happy_path() -> None:
         masked_recon_coeff=2.0,
         stochastic_mask_recon_coeff=1.0,
         layerwise_recon_coeff=None,
-        layerwise_random_recon_coeff=None,
+        layerwise_stochastic_recon_coeff=None,
         lp_sparsity_coeff=3e-3,
         schatten_coeff=None,
         embedding_recon_coeff=None,

@@ -237,21 +237,23 @@ def optimize(
             loss_terms["loss/layerwise_reconstruction"] = layerwise_recon_loss.item()
 
         ####### layerwise random recon loss #######
-        if config.layerwise_random_recon_coeff is not None:
-            layerwise_random_masks = calc_random_masks(
+        if config.layerwise_stochastic_recon_coeff is not None:
+            layerwise_stochastic_masks = calc_random_masks(
                 masks=masks, n_stochastic_masks=config.n_stochastic_masks
             )
-            layerwise_random_recon_loss = calc_layerwise_recon_loss(
+            layerwise_stochastic_recon_loss = calc_layerwise_recon_loss(
                 model=model,
                 batch=batch,
                 device=device,
                 components=components,
-                masks=layerwise_random_masks,
+                masks=layerwise_stochastic_masks,
                 target_out=target_out,
                 loss_type=config.output_loss_type,
             )
-            total_loss += config.layerwise_random_recon_coeff * layerwise_random_recon_loss
-            loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
+            total_loss += config.layerwise_stochastic_recon_coeff * layerwise_stochastic_recon_loss
+            loss_terms["loss/layerwise_stochastic_reconstruction"] = (
+                layerwise_stochastic_recon_loss.item()
+            )
 
         ####### lp sparsity loss #######
         lp_sparsity_loss = calc_lp_sparsity_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)

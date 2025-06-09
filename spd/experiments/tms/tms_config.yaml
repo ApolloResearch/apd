@@ -19,7 +19,7 @@
 # masked_recon_coeff: null
 # random_stochastic_recon_coeff: 1
 # layerwise_recon_coeff: null
-# layerwise_random_recon_coeff: 1.0
+# layerwise_stochastic_recon_coeff: 1.0
 # lp_sparsity_coeff: 3e-3
 # pnorm: 1.0
 # output_loss_type: mse
@@ -71,7 +71,7 @@ pnorm: 2.0
 lp_sparsity_coeff: 1e-4
 random_stochastic_recon_coeff: 1
 layerwise_recon_coeff: null
-layerwise_random_recon_coeff: 1.0
+layerwise_stochastic_recon_coeff: 1.0
 output_loss_type: "mse"
 
 # --- Training ---

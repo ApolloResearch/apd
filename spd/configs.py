@@ -140,7 +140,7 @@ class Config(BaseModel):
         default=None,
         description="Coefficient for per-layer reconstruction loss (deterministic mask)",
     )
-    layerwise_random_recon_coeff: NonNegativeFloat | None = Field(
+    layerwise_stochastic_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
         description="Coefficient for per-layer reconstruction loss with stochastic masks",
     )
