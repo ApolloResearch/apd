@@ -39,7 +39,7 @@ def get_run_name(
 
 
 def plot_lm_results(
-    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
+    mean_component_activation_counts: dict[str, Float[Tensor, " C"]],
 ) -> plt.Figure:
     """Plotting function for LM decomposition."""
 

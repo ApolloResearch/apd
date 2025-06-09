@@ -15,7 +15,7 @@ def calc_embedding_recon_loss(
     model: ComponentModel,
     batch: Int[Tensor, "..."],
     component: EmbeddingComponent,
-    masks: list[dict[str, Float[Tensor, "... m"]]],
+    masks: list[dict[str, Float[Tensor, "... C"]]],
     embed_module_name: str,
     unembed: bool = False,
 ) -> Float[Tensor, ""]:
@@ -59,7 +59,7 @@ def calc_embedding_recon_loss(
 
 
 def calc_schatten_loss(
-    sparsity_masks: dict[str, Float[Tensor, "... m"]],
+    sparsity_masks: dict[str, Float[Tensor, "... C"]],
     pnorm: float,
     components: dict[str, LinearComponent | EmbeddingComponent],
     device: str,
@@ -91,14 +91,14 @@ def calc_schatten_loss(
         B_norms = component.B.square().sum(dim=-1)
         schatten_norms = A_norms + B_norms
         loss = einops.einsum(
-            sparsity_masks[component_name] ** pnorm, schatten_norms, "... m, m -> ..."
+            sparsity_masks[component_name] ** pnorm, schatten_norms, "... C, C -> ..."
         )
         total_loss += loss.mean()
     return total_loss
 
 
 def calc_lp_sparsity_loss(
-    sparsity_masks: dict[str, Float[Tensor, "... m"]], pnorm: float
+    sparsity_masks: dict[str, Float[Tensor, "... C"]], pnorm: float
 ) -> Float[Tensor, ""]:
     """Calculate the Lp sparsity loss on the attributions.
 
@@ -114,7 +114,7 @@ def calc_lp_sparsity_loss(
     for layer_sparsity_mask in sparsity_masks.values():
         total_loss = total_loss + layer_sparsity_mask**pnorm
 
-    # Sum over the m dimension and mean over the other dimensions
+    # Sum over the C dimension and mean over the other dimensions
     return total_loss.sum(dim=-1).mean()
 
 
@@ -123,7 +123,7 @@ def calc_layerwise_recon_loss(
     batch: Int[Tensor, "..."],
     device: str,
     components: dict[str, LinearComponent | EmbeddingComponent],
-    masks: list[dict[str, Float[Tensor, "... m"]]],
+    masks: list[dict[str, Float[Tensor, "... C"]]],
     target_out: Float[Tensor, "... d_model_out"],
     loss_type: Literal["mse", "kl"] = "kl",
 ) -> Float[Tensor, ""]:
@@ -153,7 +153,7 @@ def calc_masked_recon_loss(
     model: ComponentModel,
     batch: Float[Tensor, "... d_in"],
     components: dict[str, LinearComponent | EmbeddingComponent],
-    masks: dict[str, Float[Tensor, "... m"]],
+    masks: dict[str, Float[Tensor, "... C"]],
     target_out: Float[Tensor, "... d_mdoel_out"],
     loss_type: Literal["mse", "kl"] = "mse",
 ) -> Float[Tensor, ""]:

@@ -227,7 +227,7 @@ def load_next_prompt() -> None:
             target_component_acts=target_component_acts,
             detach_inputs=True,  # No gradients needed
         )
-    st.session_state.current_masks = masks  # Dict[str, Float[Tensor, "1 seq_len m"]]
+    st.session_state.current_masks = masks  # Dict[str, Float[Tensor, "1 seq_len C"]]
 
     # Prepare token data for display
     token_data = []
@@ -351,10 +351,10 @@ def run_app(args: argparse.Namespace) -> None:
                     st.warning("Masks not calculated yet. Please load a prompt.")
                     return
 
-                layer_mask_tensor: Float[Tensor, "1 seq_len m"] = st.session_state.current_masks[
+                layer_mask_tensor: Float[Tensor, "1 seq_len C"] = st.session_state.current_masks[
                     layer_name
                 ]
-                token_mask: Float[Tensor, " m"] = layer_mask_tensor[0, idx, :]
+                token_mask: Float[Tensor, " C"] = layer_mask_tensor[0, idx, :]
 
                 # Find active components (mask > 0)
                 active_indices_layer: Int[Tensor, " n_active"] = torch.where(token_mask > 0)[0]

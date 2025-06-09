@@ -44,6 +44,5 @@ RootPath = Annotated[
     Path, BeforeValidator(to_root_path), PlainSerializer(lambda x: str(from_root_path(x)))
 ]
 
-TrigParams = tuple[float, float, float, float, float, float, float]
 
 Probability = Annotated[float, Field(strict=True, ge=0, le=1)]

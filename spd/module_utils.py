@@ -30,18 +30,16 @@ def get_nested_module_attr(module: nn.Module, access_string: str) -> Any:
 
 @torch.inference_mode()
 def remove_grad_parallel_to_subnetwork_vecs(
-    A: Float[Tensor, "... d_in m"], A_grad: Float[Tensor, "... d_in m"]
+    A: Float[Tensor, "d_in C"], A_grad: Float[Tensor, "d_in C"]
 ) -> None:
     """Modify the gradient by subtracting it's component parallel to the activation.
 
-    I.e. subtract the projection of the gradient vector onto the activation vector.
-
-    This is to stop Adam from changing the norm of A. Note that this will not completely prevent
-    Adam from changing the norm due to Adam's (m/(sqrt(v) + eps)) term not preserving the norm
-    direction.
+    This is used to prevent any gradient updates from changing the norm of A. This prevents
+    Adam from changing the norm due to Adam's (v/(sqrt(v) + eps)) term not preserving the norm
+    of vectors.
     """
-    parallel_component = einops.einsum(A_grad, A, "... d_in m, ... d_in m -> ... m")
-    A_grad -= einops.einsum(parallel_component, A, "... m, ... d_in m -> ... d_in m")
+    parallel_component = einops.einsum(A_grad, A, "d_in C, d_in C -> C")
+    A_grad -= einops.einsum(parallel_component, A, "C, d_in C -> d_in C")
 
 
 def init_param_(

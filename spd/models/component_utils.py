@@ -11,11 +11,11 @@ from spd.utils import extract_batch_data
 
 def calc_masks(
     gates: dict[str, Gate | GateMLP],
-    target_component_acts: dict[str, Float[Tensor, "batch m"]],
+    target_component_acts: dict[str, Float[Tensor, "batch C"]],
     detach_inputs: bool = False,
 ) -> tuple[
-    dict[str, Float[Tensor, "batch m"]],
-    dict[str, Float[Tensor, "batch m"]],
+    dict[str, Float[Tensor, "batch C"]],
+    dict[str, Float[Tensor, "batch C"]],
 ]:
     """Calculate the mask for the SPD model.
 
@@ -38,9 +38,9 @@ def calc_masks(
 
 
 def calc_random_masks(
-    masks: dict[str, Float[Tensor, "batch m"]],
+    masks: dict[str, Float[Tensor, "batch C"]],
     n_random_masks: int,
-) -> list[dict[str, Float[Tensor, "batch m"]]]:
+) -> list[dict[str, Float[Tensor, "batch C"]]]:
     """Calculate n_random_masks random masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
 
     Args:
@@ -63,8 +63,8 @@ def calc_random_masks(
 
 def calc_component_acts(
     pre_weight_acts: dict[str, Float[Tensor, "batch d_in"] | Int[Tensor, "batch pos"]],
-    As: dict[str, Float[Tensor, "d_in m"]],
-) -> dict[str, Float[Tensor, "batch m"]]:
+    As: dict[str, Float[Tensor, "d_in C"]],
+) -> dict[str, Float[Tensor, "batch C"]]:
     """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
 
     Args:
@@ -80,16 +80,16 @@ def calc_component_acts(
         else:
             # Linear layer
             component_acts[param_name] = einops.einsum(
-                acts, As[param_name], "... d_in, d_in m -> ... m"
+                acts, As[param_name], "... d_in, d_in C -> ... C"
             )
     return component_acts
 
 
 def calc_mask_l_zero(
-    masks: dict[str, Float[Tensor, "... m"]],
+    masks: dict[str, Float[Tensor, "... C"]],
     cutoff: float = 1e-2,
 ) -> dict[str, float]:
-    """Calculate the L0 loss on the masks, summed over the m dimension."""
+    """Calculate the L0 loss on the masks, summed over the C dimension."""
     mask_l_zero = {}
     for layer_name, mask in masks.items():
         mean_dims = tuple(range(mask.ndim - 1))
@@ -103,7 +103,7 @@ def component_activation_statistics(
     | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
     n_steps: int,
     device: str,
-) -> tuple[dict[str, float], dict[str, Float[Tensor, " m"]]]:
+) -> tuple[dict[str, float], dict[str, Float[Tensor, " C"]]]:
     """Get the number and strength of the masks over the full dataset."""
     # We used "-" instead of "." as module names can't have "." in them
     gates: dict[str, Gate | GateMLP] = {
@@ -116,7 +116,7 @@ def component_activation_statistics(
     n_tokens = {module_name.replace("-", "."): 0 for module_name in components}
     total_n_active_components = {module_name.replace("-", "."): 0 for module_name in components}
     component_activation_counts = {
-        module_name.replace("-", "."): torch.zeros(model.m, device=device)
+        module_name.replace("-", "."): torch.zeros(model.C, device=device)
         for module_name in components
     }
     data_iter = iter(dataloader)
@@ -138,7 +138,7 @@ def component_activation_statistics(
             detach_inputs=False,
         )
         for module_name, mask in masks.items():
-            # mask (batch, pos, m) or (batch, m)
+            # mask (batch, pos, C) or (batch, C)
             n_tokens[module_name] += mask.shape[:-1].numel()
 
             # Count the number of components that are active at all
@@ -153,7 +153,7 @@ def component_activation_statistics(
         module_name: (total_n_active_components[module_name] / n_tokens[module_name])
         for module_name in components
     }
-    mean_component_activation_counts: dict[str, Float[Tensor, " m"]] = {
+    mean_component_activation_counts: dict[str, Float[Tensor, " C"]] = {
         module_name: component_activation_counts[module_name] / n_tokens[module_name]
         for module_name in components
     }

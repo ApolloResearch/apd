@@ -21,8 +21,8 @@ from spd.models.components import (
 
 
 def permute_to_identity(
-    mask: Float[Tensor, "batch m"],
-) -> tuple[Float[Tensor, "batch m"], Float[Tensor, " m"]]:
+    mask: Float[Tensor, "batch C"],
+) -> tuple[Float[Tensor, "batch C"], Float[Tensor, " C"]]:
     """Permute matrix to make it as close to identity as possible.
 
     Returns:
@@ -33,19 +33,19 @@ def permute_to_identity(
     if mask.ndim != 2:
         raise ValueError(f"Mask must have 2 dimensions, got {mask.ndim}")
 
-    batch, m = mask.shape
+    batch, C = mask.shape
     new_mask = mask.clone()
-    effective_rows = min(batch, m)
-    perm_indices = torch.zeros(m, dtype=torch.long, device=mask.device)
+    effective_rows = min(batch, C)
+    perm_indices = torch.zeros(C, dtype=torch.long, device=mask.device)
 
-    perm: list[int] = [0] * m
+    perm: list[int] = [0] * C
     used: set[int] = set()
     for i in range(effective_rows):
         sorted_indices: list[int] = torch.argsort(mask[i, :], descending=True).tolist()
         chosen: int = next((col for col in sorted_indices if col not in used), sorted_indices[0])
         perm[i] = chosen
         used.add(chosen)
-    remaining: list[int] = sorted(list(set(range(m)) - used))
+    remaining: list[int] = sorted(list(set(range(C)) - used))
     for idx, col in enumerate(remaining):
         perm[effective_rows + idx] = col
     new_mask = mask[:, perm]
@@ -55,7 +55,7 @@ def permute_to_identity(
 
 
 def _plot_mask_figure(
-    masks: dict[str, Float[Tensor, "batch m"]],
+    masks: dict[str, Float[Tensor, "batch C"]],
     title_suffix: str,
     colormap: str,
     input_magnitude: float,
@@ -85,7 +85,7 @@ def _plot_mask_figure(
 
     images = []
     for j, (mask_name, mask) in enumerate(masks.items()):
-        # mask has shape (batch, m) or (batch, pos, m)
+        # mask has shape (batch, C) or (batch, pos, C)
         mask_data = mask.detach().cpu().numpy()
         if has_pos_dim:
             assert mask_data.ndim == 3
@@ -123,7 +123,7 @@ def plot_mask_vals(
     device: str | torch.device,
     input_magnitude: float,
     plot_regular_masks: bool = True,
-) -> tuple[dict[str, plt.Figure], dict[str, Float[Tensor, " m"]]]:
+) -> tuple[dict[str, plt.Figure], dict[str, Float[Tensor, " C"]]]:
     """Plot the values of the mask for a batch of inputs with single active features.
 
     Args:
@@ -203,7 +203,7 @@ def plot_mask_vals(
 
 
 def plot_subnetwork_attributions_statistics(
-    mask: Float[Tensor, "batch_size m"],
+    mask: Float[Tensor, "batch_size C"],
 ) -> dict[str, plt.Figure]:
     """Plot a vertical bar chart of the number of active subnetworks over the batch."""
     batch_size = mask.shape[0]
@@ -275,7 +275,7 @@ def plot_matrix(
 
 def plot_AB_matrices(
     components: dict[str, LinearComponent | EmbeddingComponent],
-    all_perm_indices: dict[str, Float[Tensor, " m"]] | None = None,
+    all_perm_indices: dict[str, Float[Tensor, " C"]] | None = None,
 ) -> plt.Figure:
     """Plot A and B matrices for each instance, grouped by layer."""
     As = {k: v.A for k, v in components.items()}
@@ -332,7 +332,7 @@ def plot_AB_matrices(
 
 
 def create_embed_mask_sample_table(
-    masks: dict[str, Float[Tensor, "... m"]],
+    masks: dict[str, Float[Tensor, "... C"]],
 ) -> wandb.Table | None:
     """Create a wandb table visualizing embedding mask values.
 
@@ -365,7 +365,7 @@ def create_embed_mask_sample_table(
 
 
 def plot_mean_component_activation_counts(
-    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
+    mean_component_activation_counts: dict[str, Float[Tensor, " C"]],
 ) -> plt.Figure:
     """Plots the mean activation counts for each component module in a grid."""
     n_modules = len(mean_component_activation_counts)
@@ -399,7 +399,7 @@ def plot_mean_component_activation_counts(
 
 
 def plot_mask_histograms(
-    masks: dict[str, Float[Tensor, "... m"]],
+    masks: dict[str, Float[Tensor, "... C"]],
     bins: int = 100,
 ) -> dict[str, plt.Figure]:
     """Plot histograms of mask values for each layer.

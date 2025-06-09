@@ -21,42 +21,42 @@ def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
 class Gate(nn.Module):
     """A gate that maps a single input to a single output."""
 
-    def __init__(self, m: int):
+    def __init__(self, C: int):
         super().__init__()
-        self.weight = nn.Parameter(torch.empty((m,)))
-        self.bias = nn.Parameter(torch.zeros((m,)))
+        self.weight = nn.Parameter(torch.empty((C,)))
+        self.bias = nn.Parameter(torch.zeros((C,)))
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
 
-    def forward(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
+    def forward(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
         return leaky_relu(torch.clamp(x * self.weight + self.bias, max=1))
 
-    def forward_unclamped(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
+    def forward_unclamped(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
         return upper_leaky_relu(x * self.weight + self.bias)
 
 
 class GateMLP(nn.Module):
     """A gate with a hidden layer that maps a single input to a single output."""
 
-    def __init__(self, m: int, n_gate_hidden_neurons: int):
+    def __init__(self, C: int, n_gate_hidden_neurons: int):
         super().__init__()
         self.n_gate_hidden_neurons = n_gate_hidden_neurons
 
-        self.mlp_in = nn.Parameter(torch.empty((m, n_gate_hidden_neurons)))
-        self.in_bias = nn.Parameter(torch.zeros((m, n_gate_hidden_neurons)))
-        self.mlp_out = nn.Parameter(torch.empty((m, n_gate_hidden_neurons)))
-        self.out_bias = nn.Parameter(torch.zeros((m,)))
+        self.mlp_in = nn.Parameter(torch.empty((C, n_gate_hidden_neurons)))
+        self.in_bias = nn.Parameter(torch.zeros((C, n_gate_hidden_neurons)))
+        self.mlp_out = nn.Parameter(torch.empty((C, n_gate_hidden_neurons)))
+        self.out_bias = nn.Parameter(torch.zeros((C,)))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
-    def _compute_pre_activation(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
+    def _compute_pre_activation(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
         """Compute the output before applying the final activation function."""
         # First layer with gelu activation
         hidden = einops.einsum(
             x,
             self.mlp_in,
-            "... m, m n_gate_hidden_neurons -> ... m n_gate_hidden_neurons",
+            "... C, C n_gate_hidden_neurons -> ... C n_gate_hidden_neurons",
         )
         hidden = hidden + self.in_bias
         hidden = F.gelu(hidden)
@@ -65,17 +65,17 @@ class GateMLP(nn.Module):
         out = einops.einsum(
             hidden,
             self.mlp_out,
-            "... m n_gate_hidden_neurons, m n_gate_hidden_neurons -> ... m",
+            "... C n_gate_hidden_neurons, C n_gate_hidden_neurons -> ... C",
         )
         out = out + self.out_bias
         return out
 
     @torch.compile
-    def forward(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
+    def forward(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
         return leaky_relu(torch.clamp(self._compute_pre_activation(x), max=1))
 
     @torch.compile
-    def forward_unclamped(self, x: Float[Tensor, "batch m"]) -> Float[Tensor, "batch m"]:
+    def forward_unclamped(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
         return upper_leaky_relu(self._compute_pre_activation(x))
 
 
@@ -85,23 +85,23 @@ class LinearComponent(nn.Module):
     The weight matrix W is decomposed as W = A @ B, where A and B are learned parameters.
     """
 
-    def __init__(self, d_in: int, d_out: int, m: int, bias: Tensor | None):
+    def __init__(self, d_in: int, d_out: int, C: int, bias: Tensor | None):
         super().__init__()
-        self.m = m
+        self.C = C
 
-        self.A = nn.Parameter(torch.empty(d_in, m))
-        self.B = nn.Parameter(torch.empty(m, d_out))
+        self.A = nn.Parameter(torch.empty(d_in, C))
+        self.B = nn.Parameter(torch.empty(C, d_out))
         self.bias = bias
 
         init_param_(self.A, fan_val=d_out, nonlinearity="linear")
-        init_param_(self.B, fan_val=m, nonlinearity="linear")
+        init_param_(self.B, fan_val=C, nonlinearity="linear")
 
-        self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
+        self.mask: Float[Tensor, "... C"] | None = None  # Gets set on sparse forward passes
 
     @property
     def weight(self) -> Float[Tensor, "d_out d_in"]:
         """A @ B"""
-        return einops.einsum(self.A, self.B, "d_in m, m d_out -> d_out d_in")
+        return einops.einsum(self.A, self.B, "d_in C, C d_out -> d_out d_in")
 
     @torch.compile
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
@@ -113,12 +113,12 @@ class LinearComponent(nn.Module):
         Returns:
             output: The summed output across all components
         """
-        component_acts = einops.einsum(x, self.A, "... d_in, d_in m -> ... m")
+        component_acts = einops.einsum(x, self.A, "... d_in, d_in C -> ... C")
 
         if self.mask is not None:
             component_acts *= self.mask
 
-        out = einops.einsum(component_acts, self.B, "... m, m d_out -> ... d_out")
+        out = einops.einsum(component_acts, self.B, "... C, C d_out -> ... d_out")
 
         if self.bias is not None:
             out += self.bias
@@ -133,26 +133,26 @@ class EmbeddingComponent(nn.Module):
         self,
         vocab_size: int,
         embedding_dim: int,
-        m: int,
+        C: int,
     ):
         super().__init__()
-        self.m = m
+        self.C = C
 
-        self.A = nn.Parameter(torch.empty(vocab_size, m))
-        self.B = nn.Parameter(torch.empty(m, embedding_dim))
+        self.A = nn.Parameter(torch.empty(vocab_size, C))
+        self.B = nn.Parameter(torch.empty(C, embedding_dim))
 
         # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
         init_param_(self.A, fan_val=embedding_dim, nonlinearity="linear")
-        init_param_(self.B, fan_val=m, nonlinearity="linear")
+        init_param_(self.B, fan_val=C, nonlinearity="linear")
 
         # For sparse forward passes
-        self.mask: Float[Tensor, "batch pos m"] | None = None
+        self.mask: Float[Tensor, "batch pos C"] | None = None
 
     @property
     def weight(self) -> Float[Tensor, "vocab_size embedding_dim"]:
         """A @ B"""
         return einops.einsum(
-            self.A, self.B, "vocab_size m, ... m embedding_dim -> vocab_size embedding_dim"
+            self.A, self.B, "vocab_size C, ... C embedding_dim -> vocab_size embedding_dim"
         )
 
     @torch.compile
@@ -168,12 +168,12 @@ class EmbeddingComponent(nn.Module):
             x: Input tensor of token indices
         """
         # From https://github.com/pytorch/pytorch/blob/main/torch/_decomp/decompositions.py#L1211
-        component_acts = self.A[x]  # (batch pos m)
+        component_acts = self.A[x]  # (batch pos C)
 
         if self.mask is not None:
             component_acts *= self.mask
 
         out = einops.einsum(
-            component_acts, self.B, "batch pos m, ... m embedding_dim -> batch pos embedding_dim"
+            component_acts, self.B, "batch pos C, ... C embedding_dim -> batch pos embedding_dim"
         )
         return out

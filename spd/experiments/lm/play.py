@@ -33,14 +33,14 @@ model = LlamaForCausalLM.from_pretrained(model_path, device_map="cuda")
 comp_model = ComponentModel(
     base_model=model,
     target_module_patterns=["model.model.layers.*.mlp.gate_proj"],
-    m=17,
+    C=17,
     n_gate_hidden_neurons=None,
     pretrained_model_output_attr="logits",
 )
 
 # # Create components with rank=10 (adjust as needed)
 # gate_proj_components = create_target_components(
-#     model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
+#     model, rank=C, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
 # )
 gate_proj_components: dict[str, LinearComponent | EmbeddingComponent] = {
     k.removeprefix("components.").replace("-", "."): v for k, v in comp_model.components.items()
@@ -91,7 +91,7 @@ print("Component logits", logits)
 
 # Create some dummy masks
 masks = {
-    f"model.model.layers.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], comp_model.m)
+    f"model.model.layers.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], comp_model.C)
     for i in range(len(model.model.layers))
 }
 

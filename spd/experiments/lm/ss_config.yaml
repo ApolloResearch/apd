@@ -7,7 +7,7 @@ wandb_run_name_prefix: ""
 # --- General ---
 seed: 0
 unit_norm_matrices: false
-m: 100
+C: 100
 n_random_masks: 1
 n_gate_hidden_neurons: null
 target_module_patterns: ["model.embed_tokens"]

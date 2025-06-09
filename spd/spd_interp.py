@@ -217,12 +217,8 @@ if __name__ == "__main__":
         "wandb:spd-resid-mlp/runs/5whdnjhz",  # 1e-6
         "wandb:spd-resid-mlp/runs/18v49hfa",  # 3e-6
         "wandb:spd-resid-mlp/runs/howbugfl",  # Best. 1e-5
-        # "wandb:spd-resid-mlp/runs/3i73r87p",
         "wandb:spd-resid-mlp/runs/flaqx6dr",  # 1e-4
-        # "wandb:spd-resid-mlp/runs/anytnggy",
         "wandb:spd-resid-mlp/runs/bfgxcmnb",  # 1e-3
-        # "wandb:spd-resid-mlp/runs/yfmf8jwr",
-        # "wandb:spd-resid-mlp/runs/yrd4woih",  # 1e-2
     ]
     best_idx = [2]
 

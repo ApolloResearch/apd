@@ -67,10 +67,10 @@ class TMSAnalyzer:
         linear1_component = self.comp_model.components["linear1"]
 
         assert isinstance(linear1_component, LinearComponent)
-        As = linear1_component.A.detach().cpu()  # (n_features, m)
-        Bs = linear1_component.B.detach().cpu()  # (m, n_hidden)
+        As = linear1_component.A.detach().cpu()  # (n_features, C)
+        Bs = linear1_component.B.detach().cpu()  # (C, n_hidden)
 
-        # Calculate subnets: (n_features, m) x (m, n_hidden) -> (m, n_features, n_hidden)
+        # Calculate subnets: (n_features, C) x (C, n_hidden) -> (C, n_features, n_hidden)
         subnets = torch.einsum("f C, C h -> C f h", As, Bs)
         return subnets
 

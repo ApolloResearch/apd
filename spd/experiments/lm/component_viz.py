@@ -50,7 +50,7 @@ def main(path: ModelPath) -> None:
             device=device,
         )
     )
-    logger.info(f"n_components: {ss_model.m}")
+    logger.info(f"n_components: {ss_model.C}")
     logger.info(f"mean_n_active_components_per_token: {mean_n_active_components_per_token}")
     logger.info(f"mean_component_activation_counts: {mean_component_activation_counts}")
     fig = plot_mean_component_activation_counts(

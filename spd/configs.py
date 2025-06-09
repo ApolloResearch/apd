@@ -106,9 +106,9 @@ class Config(BaseModel):
         default=False,
         description="Whether to renormalise each A matrix so every column has unit 2-norm",
     )
-    m: PositiveInt = Field(
+    C: PositiveInt = Field(
         ...,
-        description="Rank of the decomposition / number of components per layer",
+        description="The number of subcomponents per layer",
     )
     n_random_masks: PositiveInt = Field(
         ...,

@@ -155,10 +155,10 @@ def compute_spd_weight_neuron_contributions(
     components: dict[str, LinearComponent],
     target_model: ResidualMLP,
     n_features: int | None = None,
-) -> Float[Tensor, "n_layers n_features m d_mlp"]:
+) -> Float[Tensor, "n_layers n_features C d_mlp"]:
     """Compute per-neuron contribution strengths for the *SPD* factorisation.
 
-    Returns a tensor of shape ``(n_layers, n_features, m, d_mlp)`` where *m* is
+    Returns a tensor of shape ``(n_layers, n_features, C, d_mlp)`` where *C* is
     the number of sub-components in the SPD decomposition.
     """
 
@@ -168,12 +168,12 @@ def compute_spd_weight_neuron_contributions(
     W_E: Float[Tensor, "n_features d_embed"] = target_model.W_E  # type: ignore
 
     # Build the *virtual* input weight matrices (A @ B) for every layer
-    W_in_spd: Float[Tensor, "n_layers d_embed m d_mlp"] = torch.stack(
+    W_in_spd: Float[Tensor, "n_layers d_embed C d_mlp"] = torch.stack(
         [
             einops.einsum(
                 components[f"layers.{i}.mlp_in"].A,
                 components[f"layers.{i}.mlp_in"].B,
-                "d_embed m, m d_mlp -> d_embed m d_mlp",
+                "d_embed C, C d_mlp -> d_embed C d_mlp",
             )
             for i in range(n_layers)
         ],
@@ -187,20 +187,20 @@ def compute_spd_weight_neuron_contributions(
     )
 
     # Connection strengths
-    in_conns_spd: Float[Tensor, "n_layers n_features m d_mlp"] = einops.einsum(
+    in_conns_spd: Float[Tensor, "n_layers n_features C d_mlp"] = einops.einsum(
         W_E,
         W_in_spd,
-        "n_features d_embed, n_layers d_embed m d_mlp -> n_layers n_features m d_mlp",
+        "n_features d_embed, n_layers d_embed C d_mlp -> n_layers n_features C d_mlp",
     )
     out_conns_spd: Float[Tensor, "n_layers d_mlp n_features"] = einops.einsum(
         W_out_spd,
         W_E,
         "n_layers d_embed d_mlp, n_features d_embed -> n_layers d_mlp n_features",
     )
-    relu_conns_spd: Float[Tensor, "n_layers n_features m d_mlp"] = einops.einsum(
+    relu_conns_spd: Float[Tensor, "n_layers n_features C d_mlp"] = einops.einsum(
         in_conns_spd,
         out_conns_spd,
-        "n_layers n_features m d_mlp, n_layers d_mlp n_features -> n_layers n_features m d_mlp",
+        "n_layers n_features C d_mlp, n_layers d_mlp n_features -> n_layers n_features C d_mlp",
     )
 
     return relu_conns_spd[:, :n_features, :, :]
@@ -228,7 +228,7 @@ def plot_spd_feature_contributions_truncated(
         )
     )
 
-    relu_conns_spd: Float[Tensor, "n_layers n_features m d_mlp"] = (
+    relu_conns_spd: Float[Tensor, "n_layers n_features C d_mlp"] = (
         compute_spd_weight_neuron_contributions(
             components=components,
             target_model=target_model,
@@ -238,9 +238,9 @@ def plot_spd_feature_contributions_truncated(
 
     max_component_indices = []
     for i in range(n_layers):
-        # For each feature, find the m component with the largest max value over d_mlp
+        # For each feature, find the C component with the largest max value over d_mlp
         max_component_indices.append(relu_conns_spd[i].max(dim=-1).values.argmax(dim=-1))
-    # For each feature, use the m values based on the max_component_indices
+    # For each feature, use the C values based on the max_component_indices
     max_component_contributions: Float[Tensor, "n_layers n_features d_mlp"] = torch.stack(
         [
             relu_conns_spd[i, torch.arange(n_features), max_component_indices[i], :]

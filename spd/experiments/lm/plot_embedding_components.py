@@ -14,7 +14,7 @@ from spd.models.components import EmbeddingComponent, Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
 
 
-def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor, "vocab m"]:
+def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor, "vocab C"]:
     """Collect masks for each vocab token.
 
     Args:
@@ -22,7 +22,7 @@ def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor,
         device: Device to run computation on
 
     Returns:
-        Tensor of shape (vocab_size, m) containing masks for each vocab token
+        Tensor of shape (vocab_size, C) containing masks for each vocab token
     """
     # We used "-" instead ofGateMLP module names can't have "." in them
     gates: dict[str, Gate | GateMLP] = {
@@ -37,7 +37,7 @@ def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor,
 
     vocab_size = model.model.get_parameter("transformer.wte.weight").shape[0]
 
-    all_masks = torch.zeros((vocab_size, model.m), device=device)
+    all_masks = torch.zeros((vocab_size, model.C), device=device)
 
     for token_id in tqdm(range(vocab_size), desc="Collecting masks"):
         # Create single token input
@@ -62,24 +62,24 @@ def collect_embedding_masks(model: ComponentModel, device: str) -> Float[Tensor,
 
 
 def permute_to_identity(
-    mask: Float[Tensor, "vocab m"],
-) -> tuple[Float[Tensor, "vocab m"], Float[Tensor, " vocab"]]:
+    mask: Float[Tensor, "vocab C"],
+) -> tuple[Float[Tensor, "vocab C"], Float[Tensor, " vocab"]]:
     """Returns (permuted_mask, permutation_indices)"""
-    vocab, m = mask.shape
+    vocab, C = mask.shape
     new_mask = mask.clone()
-    effective_rows = min(vocab, m)
+    effective_rows = min(vocab, C)
     # Store permutation indices for each instance
-    perm_indices = torch.zeros((m), dtype=torch.long, device=mask.device)
+    perm_indices = torch.zeros((C), dtype=torch.long, device=mask.device)
 
     mat: Tensor = mask[:, :]
-    perm: list[int] = [0] * m
+    perm: list[int] = [0] * C
     used: set[int] = set()
     for i in range(effective_rows):
         sorted_indices: list[int] = torch.argsort(mat[i, :], descending=True).tolist()
         chosen: int = next((col for col in sorted_indices if col not in used), sorted_indices[0])
         perm[i] = chosen
         used.add(chosen)
-    remaining: list[int] = sorted(list(set(range(m)) - used))
+    remaining: list[int] = sorted(list(set(range(C)) - used))
     for idx, col in enumerate(remaining):
         perm[effective_rows + idx] = col
     new_mask[:, :] = mat[:, perm]
@@ -88,11 +88,11 @@ def permute_to_identity(
     return new_mask, perm_indices
 
 
-def plot_embedding_mask_heatmap(masks: Float[Tensor, "vocab m"], out_dir: Path) -> None:
+def plot_embedding_mask_heatmap(masks: Float[Tensor, "vocab C"], out_dir: Path) -> None:
     """Plot heatmap of embedding masks.
 
     Args:
-        masks: Tensor of shape (vocab_size, m) containing masks
+        masks: Tensor of shape (vocab_size, C) containing masks
         out_dir: Directory to save the plots
     """
     plt.figure(figsize=(20, 10))
@@ -109,7 +109,7 @@ def plot_embedding_mask_heatmap(masks: Float[Tensor, "vocab m"], out_dir: Path) 
     plt.xticks(range(0, masks.shape[1], 1000))  # Show every 1000th tick on x-axis
     plt.yticks(range(0, masks.shape[0], 1000))  # Show every 1000th tick on y-axis
 
-    plt.xlabel("Component Index (m)")
+    plt.xlabel("Component Index (C)")
     plt.ylabel("Vocab Token ID")
     plt.title("Embedding Component Masks per Token")
     plt.tight_layout()

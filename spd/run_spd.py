@@ -57,7 +57,7 @@ def get_common_run_name_suffix(config: Config) -> str:
         run_suffix += f"randrecon{config.random_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
     run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
-    run_suffix += f"m{config.m}_"
+    run_suffix += f"C{config.C}_"
     run_suffix += f"sd{config.seed}_"
     run_suffix += f"lr{config.lr:.2e}_"
     run_suffix += f"bs{config.batch_size}_"
@@ -82,7 +82,7 @@ def optimize(
     model = ComponentModel(
         base_model=target_model,
         target_module_patterns=config.target_module_patterns,
-        m=config.m,
+        C=config.C,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
         pretrained_model_output_attr=config.pretrained_model_output_attr,
     )
@@ -129,8 +129,8 @@ def optimize(
     log_data = {}
     data_iter = iter(train_loader)
 
-    alive_components: dict[str, Bool[Tensor, " m"]] = {
-        layer_name: torch.zeros(config.m, device=device).bool() for layer_name in components
+    alive_components: dict[str, Bool[Tensor, " C"]] = {
+        layer_name: torch.zeros(config.C, device=device).bool() for layer_name in components
     }
 
     # Use tqdm directly in the loop, iterate one extra step for final logging/plotting/saving
@@ -324,7 +324,7 @@ def optimize(
                     log_data[f"{layer_name}/n_alive_components_01"] = (
                         layer_alive_components.sum().item()
                     )
-                    alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
+                    alive_components[layer_name] = torch.zeros(config.C, device=device).bool()
 
                 target_logits = model(batch)
 

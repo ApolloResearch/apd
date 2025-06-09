@@ -43,27 +43,27 @@ class ComponentModel(nn.Module):
         self,
         base_model: nn.Module,
         target_module_patterns: list[str],
-        m: int,
+        C: int,
         n_gate_hidden_neurons: int | None,
         pretrained_model_output_attr: str | None,
     ):
         super().__init__()
         self.model = base_model
-        self.m = m
+        self.C = C
         self.pretrained_model_output_attr = pretrained_model_output_attr
         self.components = self.create_target_components(
-            target_module_patterns=target_module_patterns, m=m
+            target_module_patterns=target_module_patterns, C=C
         )
 
         # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
         gate_class = GateMLP if n_gate_hidden_neurons is not None else Gate
-        gate_kwargs = {"m": m}
+        gate_kwargs = {"C": C}
         if n_gate_hidden_neurons is not None:
             gate_kwargs["n_gate_hidden_neurons"] = n_gate_hidden_neurons
 
         self.gates = nn.ModuleDict({name: gate_class(**gate_kwargs) for name in self.components})
 
-    def create_target_components(self, target_module_patterns: list[str], m: int) -> nn.ModuleDict:
+    def create_target_components(self, target_module_patterns: list[str], C: int) -> nn.ModuleDict:
         """Create target components for the model."""
         components: dict[str, LinearComponent | EmbeddingComponent] = {}
         matched_patterns: set[str] = set()
@@ -76,13 +76,13 @@ class ComponentModel(nn.Module):
                         d_out, d_in = module.weight.shape
                         # Replace "." with "-" in the name to avoid issues with module dict keys
                         components[name.replace(".", "-")] = LinearComponent(
-                            d_in=d_in, d_out=d_out, m=m, bias=module.bias
+                            d_in=d_in, d_out=d_out, C=C, bias=module.bias
                         )
                     elif isinstance(module, nn.Embedding):
                         components[name.replace(".", "-")] = EmbeddingComponent(
                             vocab_size=module.num_embeddings,
                             embedding_dim=module.embedding_dim,
-                            m=m,
+                            C=C,
                         )
                     else:
                         raise ValueError(
@@ -130,7 +130,7 @@ class ComponentModel(nn.Module):
         *args: Any,
         module_name: str,
         component: LinearComponent | EmbeddingComponent,
-        mask: Float[Tensor, "... m"] | None = None,
+        mask: Float[Tensor, "... C"] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward pass with a single component replacement."""
@@ -155,7 +155,7 @@ class ComponentModel(nn.Module):
         self,
         *args: Any,
         components: dict[str, LinearComponent | EmbeddingComponent],
-        masks: dict[str, Float[Tensor, "... m"]] | None = None,
+        masks: dict[str, Float[Tensor, "... C"]] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward pass with temporary component replacement."""
@@ -271,7 +271,7 @@ class ComponentModel(nn.Module):
         comp_model = ComponentModel(
             base_model=base_model,
             target_module_patterns=config.target_module_patterns,
-            m=config.m,
+            C=config.C,
             n_gate_hidden_neurons=config.n_gate_hidden_neurons,
             pretrained_model_output_attr=config.pretrained_model_output_attr,
         )
@@ -303,6 +303,6 @@ def init_As_and_Bs_(
         B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
 
         # Calculate inner products
-        m_norms = einops.einsum(A, B, target_weight, "d_in m, m d_out, d_out d_in -> m")
+        C_norms = einops.einsum(A, B, target_weight, "d_in C, C d_out, d_out d_in -> C")
         # Scale B by the inner product.
-        B.data[:] = B.data * m_norms.unsqueeze(-1)
+        B.data[:] = B.data * C_norms.unsqueeze(-1)
