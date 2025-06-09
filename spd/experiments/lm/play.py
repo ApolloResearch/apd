@@ -1,38 +1,49 @@
 # %%
-import torch
-from simple_stories_train.models.llama import Llama
-from simple_stories_train.models.model_configs import MODEL_CONFIGS
-from transformers import AutoTokenizer
+# Example / sandbox script for running ComponentModel on a pretrained model.
 
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+import torch
+from transformers import AutoTokenizer, LlamaForCausalLM
+
+from spd.models.component_model import ComponentModel
+from spd.models.components import EmbeddingComponent, LinearComponent
+
+# %%
+print("Loading base language model ...")
+
+model_path = "SimpleStories/SimpleStories-1.25M"
+assert model_path is not None, (
+    "`pretrained_model_path` must be specified in the config when using ComponentModel."
+)
+
+base_model = LlamaForCausalLM.from_pretrained(model_path)
 
 # %%
 # Select the model size you want to use
-model_size = "1.25M"  # Options: "35M", "30M", "11M", "5M", "1.25M"
+model_path = "SimpleStories/SimpleStories-1.25M"
 
-# Load model configuration
-model_config = MODEL_CONFIGS[model_size]
-
-# Load appropriate model
-model_path = f"chandan-sreedhara/SimpleStories-{model_size}"
-model = Llama.from_pretrained(model_path, model_config)
+# Load the base model
+model = LlamaForCausalLM.from_pretrained(model_path, device_map="cuda")
 # model.to("cuda")
-model.eval()
+
 # %%
 
-ss_model = SSModel(
-    llama_model=model,
-    target_module_patterns=["model.transformer.h.*.mlp.gate_proj"],
+# ------------------------------------------------------------------
+# Build ComponentModel
+# ------------------------------------------------------------------
+comp_model = ComponentModel(
+    base_model=model,
+    target_module_patterns=["model.model.layers.*.mlp.gate_proj"],
     m=17,
     n_gate_hidden_neurons=None,
+    pretrained_model_output_attr="logits",
 )
 
 # # Create components with rank=10 (adjust as needed)
 # gate_proj_components = create_target_components(
 #     model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
 # )
-gate_proj_components: dict[str, LinearComponentWithBias] = {
-    k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
+gate_proj_components: dict[str, LinearComponent | EmbeddingComponent] = {
+    k.removeprefix("components.").replace("-", "."): v for k, v in comp_model.components.items()
 }  # type: ignore
 # %%
 # Load tokenizer
@@ -44,7 +55,7 @@ prompt = "The curious cat looked at the"
 # IMPORTANT: Use tokenizer without special tokens
 inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
 # input_ids = inputs.input_ids.to("cuda")
-input_ids = inputs.input_ids
+input_ids = inputs.input_ids.to("cuda")
 # Targets should be the inputs shifted by one (we will later ignore the last input token)
 targets = input_ids[:, 1:]
 input_ids = input_ids[:, :-1]
@@ -68,25 +79,23 @@ eos_token_id = 1
 # %%
 
 # logits, _ = ss_model.forward(input_ids, components=gate_proj_components)
-logits, _ = ss_model.forward(input_ids)
+logits = comp_model.forward(input_ids).logits
 print("inputs_shape", input_ids.shape)
 print("logits", logits)
 print("logits shape", logits.shape)
 
-logits, _ = ss_model.forward_with_components(input_ids, components=gate_proj_components)
+logits = comp_model.forward_with_components(input_ids, components=gate_proj_components)
 
 print("Component logits shape", logits.shape)
 print("Component logits", logits)
 
 # Create some dummy masks
 masks = {
-    f"model.transformer.h.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], ss_model.m)
-    for i in range(len(model.transformer.h))
+    f"model.model.layers.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], comp_model.m)
+    for i in range(len(model.model.layers))
 }
 
-logits, _ = ss_model.forward_with_components(
-    input_ids, components=gate_proj_components, masks=masks
-)
+logits = comp_model.forward_with_components(input_ids, components=gate_proj_components, masks=masks)
 
 print("Masked component logits shape", logits.shape)
 print("Masked component logits", logits)

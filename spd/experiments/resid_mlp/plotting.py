@@ -6,16 +6,15 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from spd.experiments.resid_mlp.models import ResidualMLPConfig, ResidualMLPSPDConfig
+from spd.experiments.resid_mlp.models import ResidualMLPConfig
 
 
 def plot_individual_feature_response(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDConfig,
+    model_config: ResidualMLPConfig,
     sweep: bool = False,
     subtract_inputs: bool = True,
-    instance_idx: int = 0,
     plot_type: Literal["line", "scatter"] = "scatter",
     ax: plt.Axes | None = None,
     cbar: bool = True,
@@ -26,15 +25,13 @@ def plot_individual_feature_response(
     If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
     arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
     """
-    n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = model_config.n_features
-    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch = torch.zeros(batch_size, n_features, device=device)
     inputs = torch.ones(n_features) if not sweep else torch.linspace(-1, 1, n_features)
-    batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = inputs.to(device)
+    batch[torch.arange(n_features), torch.arange(n_features)] = inputs.to(device)
     out = model_fn(batch)
 
-    out = out[:, instance_idx, :]
     cmap_viridis = plt.get_cmap("viridis")
     fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
     sweep_str = "set to 1" if not sweep else "between -1 and 1"
@@ -46,7 +43,7 @@ def plot_individual_feature_response(
     )
     ax.set_title(title)
     if subtract_inputs:
-        out = out - batch[:, instance_idx, :]
+        out = out - batch
     for f in range(n_features):
         x = torch.arange(n_features)
         y = out[f, :].detach().cpu()
@@ -74,7 +71,7 @@ def plot_individual_feature_response(
             raise ValueError("Unknown plot_type")
     # Plot labels
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
-    inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
+    inputs = batch[torch.arange(n_features), torch.arange(n_features)].detach().cpu()
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
     if plot_type == "line":
@@ -120,9 +117,8 @@ def plot_individual_feature_response(
 def plot_single_feature_response(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDConfig,
+    model_config: ResidualMLPConfig,
     subtract_inputs: bool = True,
-    instance_idx: int = 0,
     feature_idx: int = 15,
     plot_type: Literal["line", "scatter"] = "scatter",
     ax: plt.Axes | None = None,
@@ -133,22 +129,20 @@ def plot_single_feature_response(
     If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
     arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
     """
-    n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = 1
     batch_idx = 0
-    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
-    batch[batch_idx, instance_idx, feature_idx] = 1
+    batch = torch.zeros(batch_size, n_features, device=device)
+    batch[batch_idx, feature_idx] = 1
     out = model_fn(batch)
 
-    out = out[:, instance_idx, :]
     cmap_viridis = plt.get_cmap("viridis")
     fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
     if subtract_inputs:
-        out = out - batch[:, instance_idx, :]
+        out = out - batch
     x = torch.arange(n_features)
     y = out[batch_idx, :].detach().cpu()
-    inputs = batch[batch_idx, instance_idx, :].detach().cpu()
+    inputs = batch[batch_idx, :].detach().cpu()
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     if plot_type == "line":
@@ -199,25 +193,22 @@ def plot_single_feature_response(
 def plot_single_relu_curve(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDConfig,
+    model_config: ResidualMLPConfig,
     subtract_inputs: bool = True,
-    instance_idx: int = 0,
     feature_idx: int = 15,
     ax: plt.Axes | None = None,
     label: bool = True,
 ):
-    n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = 1000
     x = torch.linspace(-1, 1, batch_size)
-    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
-    batch[:, instance_idx, feature_idx] = x
+    batch = torch.zeros(batch_size, n_features, device=device)
+    batch[:, feature_idx] = x
     out = model_fn(batch)
-    out = out[:, instance_idx, :]
     cmap_viridis = plt.get_cmap("viridis")
     fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
     if subtract_inputs:
-        out = out - batch[:, instance_idx, :]
+        out = out - batch
 
     y = out[:, feature_idx].detach().cpu()
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
@@ -249,10 +240,9 @@ def plot_single_relu_curve(
 def plot_all_relu_curves(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDConfig,
+    model_config: ResidualMLPConfig,
     ax: plt.Axes,
     subtract_inputs: bool = True,
-    instance_idx: int = 0,
 ):
     n_features = model_config.n_features
     fig = ax.figure
@@ -262,7 +252,6 @@ def plot_all_relu_curves(
             device=device,
             model_config=model_config,
             subtract_inputs=subtract_inputs,
-            instance_idx=instance_idx,
             feature_idx=feature_idx,
             ax=ax,
             label=False,

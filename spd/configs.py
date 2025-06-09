@@ -13,77 +13,239 @@ from pydantic import (
 )
 
 from spd.log import logger
-from spd.types import ModelPath, Probability
+from spd.spd_types import ModelPath, Probability
 
 
 class TMSTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    task_name: Literal["tms"] = "tms"
-    feature_probability: Probability
-    data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
-        "at_least_zero_active"
+    task_name: Literal["tms"] = Field(
+        default="tms",
+        description="Task identifier for TMS",
     )
-    pretrained_model_path: ModelPath  # e.g. wandb:spd-tms/runs/si0zbfxf
+    feature_probability: Probability = Field(
+        ...,
+        description="Probability that a given feature is active in generated data",
+    )
+    data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = Field(
+        default="at_least_zero_active",
+        description="Strategy for generating synthetic data for TMS training",
+    )
 
 
 class ResidualMLPTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    task_name: Literal["residual_mlp"] = "residual_mlp"
-    feature_probability: Probability
+    task_name: Literal["residual_mlp"] = Field(
+        default="residual_mlp",
+        description="Identifier for the residual-MLP decomposition task",
+    )
+    feature_probability: Probability = Field(
+        ...,
+        description="Probability that a given feature is active in generated data",
+    )
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
-    ] = "at_least_zero_active"
-    pretrained_model_path: ModelPath  # e.g. wandb:spd-resid-mlp/runs/j9kmavzi
+    ] = Field(
+        default="at_least_zero_active",
+        description="Strategy for generating synthetic data for residual-MLP training",
+    )
 
 
 class LMTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    task_name: Literal["lm"] = "lm"
-    model_size: str  # e.g. "1.25M"
-    max_seq_len: PositiveInt = 512
-    buffer_size: PositiveInt = 1000
-    dataset_name: str = "lennart-finke/SimpleStories"
-    train_data_split: str = "train"
-    eval_data_split: str = "test"
-    n_eval_steps: PositiveInt = 100
+    task_name: Literal["lm"] = Field(
+        default="lm",
+        description="Identifier for the language-model decomposition task",
+    )
+    max_seq_len: PositiveInt = Field(
+        default=512,
+        description="Maximum sequence length to truncate or pad inputs to",
+    )
+    buffer_size: PositiveInt = Field(
+        default=1000,
+        description="Buffered sample count for streaming dataset shuffling",
+    )
+    dataset_name: str = Field(
+        default="lennart-finke/SimpleStories",
+        description="HuggingFace dataset identifier to use for the LM task",
+    )
+    column_name: str = Field(
+        default="story",
+        description="Dataset column that contains the text to train on",
+    )
+    train_data_split: str = Field(
+        default="train",
+        description="Name of the dataset split used for training",
+    )
+    eval_data_split: str = Field(
+        default="test",
+        description="Name of the dataset split used for evaluation",
+    )
+    # TODO: Move to main config when supported by TMS
     # List of fnmatch patterns for nn.Linear modules to decompose
-    target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
 
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    wandb_project: str | None = None
-    wandb_run_name: str | None = None
-    wandb_run_name_prefix: str = ""
-    seed: int = 0
-    batch_size: PositiveInt
-    steps: PositiveInt
-    print_freq: PositiveInt
-    image_freq: PositiveInt | None = None
-    image_on_first_step: bool = True
-    save_freq: PositiveInt | None = None
-    lr: PositiveFloat
-    out_recon_coeff: NonNegativeFloat | None = None
-    act_recon_coeff: NonNegativeFloat | None = None
-    param_match_coeff: NonNegativeFloat | None = 1.0
-    masked_recon_coeff: NonNegativeFloat | None = None
-    random_mask_recon_coeff: NonNegativeFloat | None = None
-    layerwise_recon_coeff: NonNegativeFloat | None = None
-    layerwise_random_recon_coeff: NonNegativeFloat | None = None
-    lp_sparsity_coeff: NonNegativeFloat
-    pnorm: PositiveFloat
-    m: PositiveInt
-    n_random_masks: PositiveInt
-    init_from_target_model: bool = False
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
-    lr_exponential_halflife: PositiveFloat | None = None
-    lr_warmup_pct: Probability = 0.0
-    sparsity_loss_type: Literal["jacobian"] = "jacobian"
-    unit_norm_matrices: bool = False
-    attribution_type: Literal["gradient"] = "gradient"
-    n_gate_hidden_neurons: PositiveInt | None = None
+    # --- WandB
+    wandb_project: str | None = Field(
+        default=None,
+        description="Weights & Biases project name (set to None to disable WandB logging)",
+    )
+    wandb_run_name: str | None = Field(
+        default=None,
+        description="Explicit name for the WandB run (None generates an automatic name)",
+    )
+    wandb_run_name_prefix: str = Field(
+        default="",
+        description="Prefix prepended to an auto-generated WandB run name",
+    )
+
+    # --- General ---
+    seed: int = Field(default=0, description="Random seed for reproducibility")
+    unit_norm_matrices: bool = Field(
+        default=False,
+        description="Whether to renormalise each A matrix so every column has unit 2-norm",
+    )
+    m: PositiveInt = Field(
+        ...,
+        description="Rank of the decomposition / number of components per layer",
+    )
+    n_random_masks: PositiveInt = Field(
+        ...,
+        description="Number of random masks to sample when using random-mask reconstruction loss",
+    )
+    n_gate_hidden_neurons: PositiveInt | None = Field(
+        default=None,
+        description="Hidden dimension for the gate MLP; if None, use a single-layer gate",
+    )
+    target_module_patterns: list[str] = Field(
+        ...,
+        description="List of fnmatch-style patterns that select nn.Linear / nn.Embedding modules to decompose",
+    )
+
+    # --- Loss Coefficients
+    param_match_coeff: NonNegativeFloat | None = Field(
+        default=1.0,
+        description="Coefficient for matching parameters between components and target weights",
+    )
+    masked_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for reconstruction loss with a deterministic binary mask",
+    )
+    random_mask_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for reconstruction loss with random binary masks",
+    )
+    layerwise_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for per-layer reconstruction loss (deterministic mask)",
+    )
+    layerwise_random_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for per-layer reconstruction loss with random masks",
+    )
+    lp_sparsity_coeff: NonNegativeFloat = Field(
+        ...,
+        description="Coefficient for L_p sparsity penalty applied to the gating activations",
+    )
+    schatten_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for Schatten-norm regularisation (LM only)",
+    )
+    out_recon_coeff: NonNegativeFloat | None = Field(
+        default=None,
+        description="Coefficient for output reconstruction loss",
+    )
+    embedding_recon_coeff: float | None = Field(
+        default=None,
+        description="Coefficient for additional embedding reconstruction loss (LM only)",
+    )
+    is_embed_unembed_recon: bool = Field(
+        default=False,
+        description="If True, apply embedding reconstruction jointly to embed & unembed matrices",
+    )
+    pnorm: PositiveFloat = Field(
+        ...,
+        description="The p-value used for the L_p sparsity loss",
+    )
+    output_loss_type: Literal["mse", "kl"] = Field(
+        ...,
+        description="Metric used to measure reconstruction error between model outputs and targets",
+    )
+
+    # --- Training ---
+    lr: PositiveFloat = Field(..., description="Learning rate for optimiser")
+    steps: PositiveInt = Field(..., description="Total number of optimisation steps")
+    batch_size: PositiveInt = Field(..., description="Mini-batch size used for optimisation")
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = Field(
+        default="constant",
+        description="Type of learning-rate schedule to apply",
+    )
+    lr_exponential_halflife: PositiveFloat | None = Field(
+        default=None,
+        description="Half-life parameter when using an exponential LR schedule",
+    )
+    lr_warmup_pct: Probability = Field(
+        default=0.0,
+        description="Fraction of total steps to linearly warm up the learning rate",
+    )
+    n_eval_steps: PositiveInt = Field(
+        ...,
+        description="Frequency (in optimisation steps) at which to run evaluation",
+    )
+
+    # --- Logging & Saving ---
+    image_freq: PositiveInt | None = Field(
+        default=None,
+        description="Interval (in steps) at which to log diagnostic images to WandB",
+    )
+    image_on_first_step: bool = Field(
+        default=True,
+        description="Whether to log images at optimisation step 0",
+    )
+    print_freq: PositiveInt = Field(
+        ...,
+        description="Interval (in steps) at which to print training metrics to stdout",
+    )
+    save_freq: PositiveInt | None = Field(
+        default=None,
+        description="Interval (in steps) at which to save model checkpoints (None disables saving)",
+    )
+    log_ce_losses: bool = Field(
+        default=False,
+        description="If True, additionally track cross-entropy losses during training",
+    )
+
+    # --- Pretrained model info ---
+    pretrained_model_class: str = Field(
+        ...,
+        description="Fully-qualified class name of the pretrained model to load. Can be defined "
+        "locally or an in external package (e.g. 'transformers.LlamaForCausalLM' or "
+        "'spd.experiments.resid_mlp.models.ResidualMLP').",
+    )
+    pretrained_model_path: ModelPath | None = Field(
+        default=None,
+        description="Model identifier. Local path or wandb reference "
+        "(e.g. 'wandb:spd-train-resid-mlp/runs/otxwx80v' or 'mnt/my_model/checkpoint.pth')",
+    )
+    pretrained_model_name_hf: str | None = Field(
+        default=None,
+        description="hf model identifier. E.g. 'SimpleStories/SimpleStories-1.25M'",
+    )
+    pretrained_model_output_attr: str | None = Field(
+        default=None,
+        description="Name of the attribute on the forward output that contains logits or activations",
+    )
+    tokenizer_name: str | None = Field(
+        default=None,
+        description="Name or path of the tokenizer to use when loading an LM",
+    )
+
+    # --- Task Specific ---
     task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig = Field(
-        ..., discriminator="task_name"
+        ...,
+        discriminator="task_name",
+        description="Nested task-specific configuration selected by the `task_name` discriminator",
     )
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
@@ -109,17 +271,6 @@ class Config(BaseModel):
         if not self.masked_recon_coeff and not self.lp_sparsity_coeff:
             logger.warning("Neither masked_recon_coeff nor lp_sparsity_coeff is set")
 
-        # Give a warning if both out_recon_coeff and param_match_coeff are > 0
-        if (
-            self.param_match_coeff is not None
-            and self.param_match_coeff > 0
-            and self.out_recon_coeff is not None
-            and self.out_recon_coeff > 0
-        ):
-            logger.warning(
-                "Both param_match_coeff and out_recon_coeff are > 0. It's typical to only set one."
-            )
-
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"
         if self.masked_recon_coeff == 0:
@@ -134,5 +285,4 @@ class Config(BaseModel):
             assert self.lr_exponential_halflife is not None, (
                 "lr_exponential_halflife must be set if lr_schedule is exponential"
             )
-
         return self

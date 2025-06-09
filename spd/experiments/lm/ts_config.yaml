@@ -1,0 +1,61 @@
+# Config for tinystories
+
+# --- WandB ---
+wandb_project: spd-lm
+# wandb_project: null
+wandb_run_name: null
+wandb_run_name_prefix: ""
+
+# --- General ---
+seed: 0
+unit_norm_matrices: false
+m: 100
+n_random_masks: 1
+n_gate_hidden_neurons: null
+target_module_patterns: ["transformer.h.3.mlp.c_fc"]
+
+# --- Loss Coefficients ---
+param_match_coeff: 1.0
+masked_recon_coeff: null
+random_mask_recon_coeff: null
+layerwise_recon_coeff: null
+layerwise_random_recon_coeff: 1
+lp_sparsity_coeff: 1e-6
+schatten_coeff: null
+# embedding_recon_coeff: 1
+embedding_recon_coeff: null
+is_embed_unembed_recon: false
+pnorm: 2.0
+output_loss_type: kl
+
+# --- Training ---
+batch_size: 4
+steps: 50_000
+lr: 1e-4
+lr_schedule: constant
+lr_warmup_pct: 0.01
+lr_exponential_halflife: null
+n_eval_steps: 100
+
+# --- Logging & Saving ---
+image_freq: 2000
+image_on_first_step: true
+print_freq: 1000
+save_freq: null
+log_ce_losses: true
+
+# --- Pretrained model info ---
+pretrained_model_class: transformers.AutoModelForCausalLM
+pretrained_model_name_hf: roneneldan/TinyStories-1M
+pretrained_model_output_attr: logits
+tokenizer_name: EleutherAI/gpt-neo-125M
+
+# --- Task Specific ---
+task_config:
+  task_name: lm
+  max_seq_len: 2048
+  buffer_size: 1000
+  dataset_name: "roneneldan/TinyStories"
+  column_name: "text"
+  train_data_split: "train"
+  eval_data_split: "validation"

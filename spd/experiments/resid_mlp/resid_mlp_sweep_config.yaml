@@ -4,12 +4,17 @@ metric:
   name: total_loss
   goal: minimize
 parameters:
-  seed:
-    values: [0]
   lr:
-    values: [1e-2]
-  masked_recon_coeff:
-    values: [1e-1, 1e-2]
+    values: [1e-2, 3e-3, 1e-3, 3e-4, 1e-4]
+    # values: [1e-2]
+  # masked_recon_coeff:
+  #   values: [1e-1, 1e-2]
+  lp_sparsity_coeff:
+    # values: [1e-5, 7e-6, 3e-6, 1e-6, 7e-7, 3e-7, 1e-7]
+    values: [1e-4, 1e-5, 1e-6, 1e-7]
+    # values: [1e-5]
+  # lr_schedule:
+  #   values: ["cosine"]
 
 command:
 - ${env}

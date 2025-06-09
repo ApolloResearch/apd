@@ -16,16 +16,16 @@ import streamlit as st
 import torch
 from datasets import load_dataset
 from jaxtyping import Float, Int
-from simple_stories_train.dataloaders import DatasetConfig
 from torch import Tensor
 from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+from spd.data import DatasetConfig
 from spd.log import logger
-from spd.models.components import Gate, GateMLP
+from spd.models.component_model import ComponentModel
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.run_spd import calc_component_acts, calc_masks
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 
 DEFAULT_MODEL_PATH: ModelPath = "wandb:spd-lm/runs/151bsctx"
 
@@ -35,12 +35,12 @@ DEFAULT_MODEL_PATH: ModelPath = "wandb:spd-lm/runs/151bsctx"
 # -----------------------------------------------------------
 @dataclass(frozen=True)
 class AppData:
-    model: SSModel
+    model: ComponentModel
     tokenizer: AutoTokenizer
     config: Config
     dataloader_iter_fn: Callable[[], Iterator[dict[str, Any]]]
     gates: dict[str, Gate | GateMLP]
-    components: dict[str, LinearComponentWithBias]
+    components: dict[str, LinearComponent | EmbeddingComponent]
     target_layer_names: list[str]
     device: str
 
@@ -54,7 +54,7 @@ def initialize(model_path: ModelPath) -> AppData:
     """
     device = "cpu"  # Use CPU for the Streamlit app
     logger.info(f"Initializing app with model: {model_path} on device: {device}")
-    ss_model, config, _ = SSModel.from_pretrained(model_path)
+    ss_model, config, _ = ComponentModel.from_pretrained(model_path)
     ss_model.to(device)
     ss_model.eval()
 
@@ -62,25 +62,18 @@ def initialize(model_path: ModelPath) -> AppData:
     assert isinstance(task_config, LMTaskConfig), "Task config must be LMTaskConfig for this app."
 
     # Derive tokenizer path (adjust if stored differently)
-    tokenizer_path = f"chandan-sreedhara/SimpleStories-{task_config.model_size}"
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_path,
-        add_bos_token=False,
-        unk_token="[UNK]",
-        eos_token="[EOS]",
-        bos_token=None,
-    )
+    tokenizer_path = config.pretrained_model_path
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     # Create eval dataloader config
     eval_data_config = DatasetConfig(
         name=task_config.dataset_name,
-        tokenizer_file_path=None,
-        hf_tokenizer_path=tokenizer_path,
+        hf_tokenizer_path=config.pretrained_model_name_hf,
         split=task_config.eval_data_split,
         n_ctx=task_config.max_seq_len,
         is_tokenized=False,
-        streaming=True,
-        column_name="story",
+        streaming=False,
+        column_name=task_config.column_name,
     )
 
     # Create the dataloader iterator
@@ -138,7 +131,7 @@ def initialize(model_path: ModelPath) -> AppData:
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in ss_model.gates.items()
     }  # type: ignore[reportAssignmentType]
-    components: dict[str, LinearComponentWithBias] = {
+    components: dict[str, LinearComponent | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
     }  # type: ignore[reportAssignmentType]
     target_layer_names = sorted(list(components.keys()))
@@ -224,7 +217,7 @@ def load_next_prompt() -> None:
 
     # Calculate activations and masks
     with torch.no_grad():
-        (_, _), pre_weight_acts = app_data.model.forward_with_pre_forward_cache_hooks(
+        _, pre_weight_acts = app_data.model.forward_with_pre_forward_cache_hooks(
             input_ids, module_names=list(app_data.components.keys())
         )
         As = {module_name: v.linear_component.A for module_name, v in app_data.components.items()}
@@ -232,7 +225,6 @@ def load_next_prompt() -> None:
         masks, _ = calc_masks(
             gates=app_data.gates,
             target_component_acts=target_component_acts,
-            attributions=None,
             detach_inputs=True,  # No gradients needed
         )
     st.session_state.current_masks = masks  # Dict[str, Float[Tensor, "1 seq_len m"]]
@@ -398,7 +390,7 @@ if __name__ == "__main__":
         "--model_path",
         type=str,
         default=DEFAULT_MODEL_PATH,
-        help=f"Path or W&B reference to the trained SSModel. Default: {DEFAULT_MODEL_PATH}",
+        help=f"Path or W&B reference to the trained ComponentModel. Default: {DEFAULT_MODEL_PATH}",
     )
     args = parser.parse_args()
 

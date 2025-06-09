@@ -1,25 +1,50 @@
 """Run SPD on a model."""
 
 from collections.abc import Callable
-from functools import partial
 from pathlib import Path
 
 import einops
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 import wandb
-from jaxtyping import Float
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.configs import Config
-from spd.hooks import HookedRootModule
-from spd.models.base import SPDModel
-from spd.models.components import Gate, GateMLP, Linear, LinearComponent
-from spd.module_utils import collect_nested_module_attrs, get_nested_module_attr
-from spd.utils import calc_recon_mse, get_lr_schedule_fn, get_lr_with_warmup
+from spd.log import logger
+from spd.losses import (
+    calc_embedding_recon_loss,
+    calc_layerwise_recon_loss,
+    calc_lp_sparsity_loss,
+    calc_masked_recon_loss,
+    calc_param_match_loss,
+    calc_schatten_loss,
+)
+from spd.models.component_model import ComponentModel, init_As_and_Bs_
+from spd.models.component_utils import (
+    calc_component_acts,
+    calc_mask_l_zero,
+    calc_masks,
+    calc_random_masks,
+    component_activation_statistics,
+)
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
+from spd.plotting import (
+    create_embed_mask_sample_table,
+    plot_mask_histograms,
+    plot_mean_component_activation_counts,
+)
+from spd.utils import (
+    calc_kl_divergence_lm,
+    extract_batch_data,
+    get_lr_schedule_fn,
+    get_lr_with_warmup,
+)
 
 
 def get_common_run_name_suffix(config: Config) -> str:
@@ -28,367 +53,89 @@ def get_common_run_name_suffix(config: Config) -> str:
     if config.masked_recon_coeff is not None:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
         run_suffix += f"nrandmasks{config.n_random_masks}_"
-    if config.act_recon_coeff is not None:
-        run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
     if config.random_mask_recon_coeff is not None:
         run_suffix += f"randrecon{config.random_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
     run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
     run_suffix += f"m{config.m}_"
     run_suffix += f"sd{config.seed}_"
-    run_suffix += f"attr-{config.attribution_type[:3]}_"
     run_suffix += f"lr{config.lr:.2e}_"
     run_suffix += f"bs{config.batch_size}_"
     return run_suffix
 
 
-def _calc_param_mse(
-    params1: dict[str, Float[Tensor, "d_in d_out"] | Float[Tensor, "n_instances d_in d_out"]],
-    params2: dict[str, Float[Tensor, "d_in d_out"] | Float[Tensor, "n_instances d_in d_out"]],
-    n_params: int,
-    device: str,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the MSE between params1 and params2, summing over the d_in and d_out dimensions.
-
-    Normalizes by the number of parameters in the model.
-
-    Args:
-        params1: The first set of parameters
-        params2: The second set of parameters
-        n_params: The number of parameters in the model
-        device: The device to use for calculations
-    """
-    param_match_loss = torch.tensor(0.0, device=device)
-    for name in params1:
-        param_match_loss = param_match_loss + ((params2[name] - params1[name]) ** 2).sum(
-            dim=(-2, -1)
-        )
-    return param_match_loss / n_params
-
-
-def calc_param_match_loss(
-    param_names: list[str],
-    target_model: HookedRootModule,
-    spd_model: SPDModel,
-    n_params: int,
-    device: str,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the MSE between the target model weights and the SPD model weights.
-
-    Args:
-        param_names: The names of the parameters to be matched.
-        target_model: The target model to match.
-        spd_model: The SPD model to match.
-        n_params: The number of parameters in the model. Used for normalization.
-        device: The device to use for calculations.
-    """
-    target_params = {}
-    spd_params = {}
-    for param_name in param_names:
-        target_params[param_name] = get_nested_module_attr(target_model, param_name + ".weight")
-        spd_params[param_name] = get_nested_module_attr(spd_model, param_name + ".weight")
-    return _calc_param_mse(
-        params1=target_params,
-        params2=spd_params,
-        n_params=n_params,
-        device=device,
-    )
-
-
-def calc_lp_sparsity_loss(
-    relud_masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-    pnorm: float,
-    eps: float = 1e-8,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the Lp sparsity loss on the attributions.
-
-    Args:
-        relud_masks: Dictionary of relu masks for each layer.
-        pnorm: The pnorm to use for the sparsity loss.
-        eps: A small epsilon to avoid division by zero when calculating gradients.
-    Returns:
-        The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
-            dimension.
-    """
-    # Initialize with zeros matching the shape of first mask
-    total_loss = torch.zeros_like(next(iter(relud_masks.values())))
-
-    for layer_relud_mask in relud_masks.values():
-        total_loss = total_loss + (layer_relud_mask.abs() + eps).pow(pnorm)
-
-    # Sum over the m dimension and mean over the batch dimension
-    return total_loss.sum(dim=-1).mean(dim=0)
-
-
-def calc_act_recon_mse(
-    acts1: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-    acts2: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """MSE between each entry in acts1 and acts2.
-    Returns:
-        The activation reconstruction loss. Will have an n_instances dimension if the model has an
-            n_instances dimension, otherwise a scalar.
-    """
-    assert acts1.keys() == acts2.keys(), f"Key mismatch: {acts1.keys()} != {acts2.keys()}"
-
-    device = next(iter(acts1.values())).device
-    m = next(iter(acts1.values())).shape[-1]
-
-    loss = torch.zeros(1, device=device)
-    for layer_name in acts1:
-        loss = loss + ((acts1[layer_name] - acts2[layer_name]) ** 2).sum(dim=-1)
-
-    # Normalize by the total number of output dimensions and mean over the batch dim
-    return (loss / (m * len(acts1))).mean(dim=0)
-
-
-def calc_masks(
-    gates: dict[str, Gate | GateMLP],
-    target_component_acts: dict[
-        str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ],
-    attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]
-    | None = None,
-    detach_inputs: bool = False,
-) -> tuple[
-    dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-    dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-]:
-    """Calculate the mask for the SPD model.
-
-    TODO: Use attributions in our gate calculation too.
-
-    Args:
-        gates: The gates to use for the mask.
-        component_acts: The activations after each subnetwork in the SPD model.
-        attributions: The attributions to use for the mask.
-        detach_inputs: Whether to detach the inputs to the gates.
-    Returns:
-        Dictionary of masks for each layer.
-    """
-    masks = {}
-    relud_masks = {}
-    for layer_name in gates:
-        gate_input = target_component_acts[layer_name]
-        if detach_inputs:
-            gate_input = gate_input.detach()
-        masks[layer_name] = gates[layer_name].forward(gate_input)
-        relud_masks[layer_name] = gates[layer_name].forward_unclamped(gate_input)
-    return masks, relud_masks
-
-
-def calc_random_masks(
-    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-    n_random_masks: int,
-) -> list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]]:
-    """Calculate n_random_masks random masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
-
-    Args:
-        masks: The masks to use for the random masks.
-        n_random_masks: The number of random masks to calculate.
-
-    Return:
-        A list of n_random_masks dictionaries, each containing the random masks for each layer.
-    """
-    random_masks = []
-    for _ in range(n_random_masks):
-        random_masks.append(
-            {
-                layer_name: mask + (1 - mask) * torch.rand_like(mask)
-                for layer_name, mask in masks.items()
-            }
-        )
-    return random_masks
-
-
-def calc_random_masks_mse_loss(
-    model: SPDModel,
-    batch: Float[Tensor, "batch n_instances d_in"],
-    random_masks: list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]],
-    out_masked: Float[Tensor, "batch n_instances d_out"],
-    has_instance_dim: bool,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the MSE over all random masks."""
-    loss = torch.tensor(0.0, device=out_masked.device)
-    for i in range(len(random_masks)):
-        out_masked_random_mask = model(batch, masks=random_masks[i])
-        loss = loss + calc_recon_mse(out_masked, out_masked_random_mask, has_instance_dim)
-
-    return loss / len(random_masks)
-
-
-def calc_component_acts(
-    pre_weight_acts: dict[
-        str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
-    ],
-    As: dict[str, Float[Tensor, "d_in m"] | Float[Tensor, "n_instances d_in m"]],
-) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
-    """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
-
-    Args:
-        pre_weight_acts: The activations before each layer in the target model.
-        As: The A matrix at each layer.
-    """
-    component_acts = {}
-    for param_name in pre_weight_acts:
-        raw_name = param_name.removesuffix(".hook_pre")
-        component_acts[raw_name] = einops.einsum(
-            pre_weight_acts[param_name], As[raw_name], "... d_in, ... d_in m -> ... m"
-        )
-    return component_acts
-
-
-def calc_masked_target_component_acts(
-    pre_weight_acts: dict[
-        str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
-    ],
-    As: dict[str, Float[Tensor, "d_in m"] | Float[Tensor, "n_instances d_in m"]],
-    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
-    """Calculate the masked target component acts for each layer."""
-    masked_target_component_acts = {}
-    for param_name in pre_weight_acts:
-        raw_name = param_name.removesuffix(".hook_pre")
-        masked_As = einops.einsum(
-            As[raw_name], masks[raw_name], "... d_in m, batch ... m -> batch ... d_in m"
-        )
-        masked_target_component_acts[raw_name] = einops.einsum(
-            pre_weight_acts[param_name],
-            masked_As,
-            "batch ... d_in, batch ... d_in m -> batch ... m",
-        )
-    return masked_target_component_acts
-
-
-def calc_layerwise_recon_loss(
-    param_names: list[str],
-    target_model: HookedRootModule,
-    spd_model: SPDModel,
-    batch: Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"],
-    device: str,
-    masks: list[dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]]],
-    target_out: Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"],
-    has_instance_dim: bool,
-) -> Float[Tensor, ""]:
-    """Calculate the layerwise activation reconstruction loss using regular PyTorch hooks.
-
-    Note that we support multiple masks for the case of calculating this loss over a list of random
-    masks.
-    """
-    total_loss = torch.tensor(0.0, device=device)
-
-    for mask in masks:
-        for param_name in param_names:
-            target_module = get_nested_module_attr(target_model, param_name)
-            assert isinstance(target_module, Linear)
-
-            component_module = get_nested_module_attr(spd_model, param_name)
-            assert isinstance(component_module, LinearComponent)
-
-            def hook(
-                module: nn.Module,
-                input: tuple[
-                    Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"], ...
-                ],
-                output: Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"],
-                param_name: str,
-                mask: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
-                component_module: LinearComponent,
-            ) -> Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]:
-                linear_output = component_module(input[0], mask=mask[param_name])
-                return linear_output
-
-            handle = target_module.register_forward_hook(
-                partial(hook, param_name=param_name, mask=mask, component_module=component_module)
-            )
-            modified_output = target_model(batch)
-            handle.remove()
-
-            mse_loss = calc_recon_mse(modified_output, target_out, has_instance_dim)
-            total_loss = total_loss + mse_loss
-
-    return total_loss / (len(param_names) * len(masks))
-
-
-def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
-    """Initialize the A and B matrices using a scale factor from the target weights."""
-    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-    Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
-    for param_name in As:
-        A = As[param_name]  # (..., d_in, m)
-        B = Bs[param_name]  # (..., m, d_out)
-        target_weight = get_nested_module_attr(
-            target_model, param_name + ".weight"
-        )  # (..., d_in, d_out)
-
-        # Make A and B have unit norm in the d_in and d_out dimensions
-        A.data[:] = torch.randn_like(A.data)
-        B.data[:] = torch.randn_like(B.data)
-        A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
-        B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
-
-        m_norms = einops.einsum(
-            A, B, target_weight, "... d_in m, ... m d_out, ... d_in d_out -> ... m"
-        )
-        # Scale B by m_norms. We leave A as is since this may get scaled with the unit_norm_matrices
-        # config options.
-        B.data[:] = B.data * m_norms.unsqueeze(-1)
-
-
-def calc_mask_l_zero(
-    masks: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
-    cutoff: float = 1e-2,
-) -> dict[str, float]:
-    """Calculate the L0 loss on the masks, summed over the m dimension."""
-    mask_l_zero = {}
-    for layer_name, mask in masks.items():
-        mean_dims = tuple(range(mask.ndim - 1))
-        mask_l_zero[layer_name] = (mask > cutoff).float().mean(dim=mean_dims).sum().item()
-    return mask_l_zero
-
-
 def optimize(
-    model: SPDModel,
+    target_model: nn.Module,
     config: Config,
     device: str,
-    dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
-    target_model: HookedRootModule,
-    param_names: list[str],
+    train_loader: DataLoader[Int[Tensor, "..."]]
+    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
+    eval_loader: DataLoader[Int[Tensor, "..."]]
+    | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
+    n_eval_steps: int,
+    out_dir: Path | None,
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
-    out_dir: Path | None = None,
+    tied_weights: list[tuple[str, str]] | None = None,
 ) -> None:
-    model.to(device=device)
-    target_model.to(device=device)
+    """Run the optimization loop for LM decomposition."""
 
-    init_As_and_Bs_(model=model, target_model=target_model)
+    model = ComponentModel(
+        base_model=target_model,
+        target_module_patterns=config.target_module_patterns,
+        m=config.m,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
+        pretrained_model_output_attr=config.pretrained_model_output_attr,
+    )
 
-    has_instance_dim = hasattr(model, "n_instances")
+    for param in target_model.parameters():
+        param.requires_grad = False
+    logger.info("Target model parameters frozen.")
 
     # We used "-" instead of "." as module names can't have "." in them
-    gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()}
+    gates: dict[str, Gate | GateMLP] = {
+        k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
+    }  # type: ignore
+    components: dict[str, LinearComponent | EmbeddingComponent] = {
+        k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
+    }  # type: ignore
 
-    # Note that we expect weight decay to be problematic for spd models
-    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
+    model.to(device)
+    init_As_and_Bs_(model=model, components=components)
+
+    if tied_weights is not None:
+        # Tie component weights. Assume that the first element is a transpose of the second element
+        for src_name, tgt_name in tied_weights:
+            components[tgt_name].B.data = components[src_name].A.data.T
+            components[tgt_name].A.data = components[src_name].B.data.T
+
+    component_params: list[torch.nn.Parameter] = []
+    gate_params: list[torch.nn.Parameter] = []
+    for name, component in components.items():
+        component_params.extend(list(component.parameters()))
+        gate_params.extend(list(gates[name].parameters()))
+
+    assert len(component_params) > 0, "No parameters found in components to optimize"
+
+    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0)
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
+    logger.info(f"Base LR scheduler created: {config.lr_schedule}")
 
     n_params = 0
-    for param_name in param_names:
-        weight = get_nested_module_attr(target_model, param_name + ".weight")
+    for module_name in components:
+        weight = model.model.get_parameter(module_name + ".weight")
         n_params += weight.numel()
 
-    if has_instance_dim:
-        # All subnetwork param have an n_instances dimension
-        n_params = n_params / model.n_instances
+    log_data = {}
+    data_iter = iter(train_loader)
 
-    epoch = 0
-    total_samples = 0
-    data_iter = iter(dataloader)
+    alive_components: dict[str, Bool[Tensor, " m"]] = {
+        layer_name: torch.zeros(config.m, device=device).bool() for layer_name in components
+    }
+
+    # Use tqdm directly in the loop, iterate one extra step for final logging/plotting/saving
     for step in tqdm(range(config.steps + 1), ncols=0):
-        if config.unit_norm_matrices:
-            assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
-            model.set_As_to_unit_norm()
-
+        # --- LR Scheduling Step --- #
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
@@ -396,220 +143,319 @@ def optimize(
             lr_schedule_fn=lr_schedule_fn,
             lr_warmup_pct=config.lr_warmup_pct,
         )
-        for group in opt.param_groups:
+        # Manually update optimizer's learning rate
+        for group in optimizer.param_groups:
             group["lr"] = step_lr
+        log_data["lr"] = step_lr
 
-        opt.zero_grad(set_to_none=True)
+        # --- Zero Gradients --- #
+        optimizer.zero_grad()
+
         try:
-            batch = next(data_iter)[0]  # Ignore labels here, we use the output of target_model
+            batch_item = next(data_iter)
+            batch = extract_batch_data(batch_item)
         except StopIteration:
-            tqdm.write(f"Epoch {epoch} finished, starting new epoch")
-            epoch += 1
-            data_iter = iter(dataloader)
-            batch = next(data_iter)[0]
+            logger.warning("Dataloader exhausted, resetting iterator.")
+            data_iter = iter(train_loader)
+            batch_item = next(data_iter)
+            batch = extract_batch_data(batch_item)
+        batch = batch.to(device)
 
-        batch = batch.to(device=device)
-        total_samples += batch.shape[0]
-
-        # Forward pass with target model
-        target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
-        target_out, target_cache = target_model.run_with_cache(
-            batch, names_filter=target_cache_filter
+        target_out, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
+            batch, module_names=list(components.keys())
         )
+        As = {module_name: components[module_name].A for module_name in components}
 
-        # Forward pass with all subnetworks
-        out = model(batch)
+        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
-        pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
-        As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
-        # attributions = calc_grad_attributions(
-        #     target_out=target_out,
-        #     pre_weight_acts=pre_weight_acts,
-        #     post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
-        #     target_component_acts=target_component_acts,
-        #     Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
-        # )
-        attributions = None
-
-        masks, relud_masks = calc_masks(
-            gates=gates,
-            target_component_acts=target_component_acts,
-            attributions=attributions,
-            detach_inputs=False,
+        masks, sparsity_masks = calc_masks(
+            gates=gates, target_component_acts=target_component_acts, detach_inputs=False
         )
-
-        # Masked forward pass
-        spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
-        out_masked, spd_cache_masked = model.run_with_cache(
-            batch, names_filter=spd_cache_filter, masks=masks
-        )
-
-        random_masks_loss = None
-        if config.random_mask_recon_coeff is not None:
-            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
-            random_masks_loss = calc_random_masks_mse_loss(
-                model=model,
-                batch=batch,
-                random_masks=random_masks,
-                out_masked=target_out,
-                has_instance_dim=has_instance_dim,
+        for layer_name, mask in masks.items():
+            alive_components[layer_name] = alive_components[layer_name] | (mask > 0.1).any(
+                dim=(0, 1)
             )
 
-        # Calculate losses
-        out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
+        # --- Calculate Losses --- #
+        total_loss = torch.tensor(0.0, device=device)
+        loss_terms = {}
 
-        param_match_loss = calc_param_match_loss(
-            param_names=param_names,
-            target_model=target_model,
-            spd_model=model,
+        ####### param match loss #######
+        param_match_loss_val = calc_param_match_loss(
+            components=components,
+            target_model=model.model,
             n_params=n_params,
             device=device,
         )
+        total_loss += config.param_match_coeff * param_match_loss_val
+        loss_terms["loss/parameter_matching"] = param_match_loss_val.item()
 
-        lp_sparsity_loss = calc_lp_sparsity_loss(relud_masks=relud_masks, pnorm=config.pnorm)
-
-        masked_recon_loss = calc_recon_mse(out_masked, target_out, has_instance_dim)
-
-        act_recon_loss = None
-        if config.act_recon_coeff is not None:
-            masked_spd_component_acts = {
-                k.removesuffix(".hook_component_acts"): v
-                for k, v in spd_cache_masked.items()
-                if k.endswith("hook_component_acts")
-            }
-            masked_target_component_acts = calc_masked_target_component_acts(
-                pre_weight_acts=pre_weight_acts, As=As, masks=masks
+        ####### masked recon loss #######
+        if config.masked_recon_coeff is not None:
+            masked_recon_loss = calc_masked_recon_loss(
+                model=model,
+                batch=batch,
+                components=components,
+                masks=masks,
+                target_out=target_out,
+                loss_type=config.output_loss_type,
             )
-            act_recon_loss = calc_act_recon_mse(
-                masked_spd_component_acts, masked_target_component_acts
-            )
+            total_loss += config.masked_recon_coeff * masked_recon_loss
+            loss_terms["loss/masked_reconstruction"] = masked_recon_loss.item()
 
-        layerwise_recon_loss = None
+        ####### random mask recon loss #######
+        if config.random_mask_recon_coeff is not None:
+            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            random_mask_loss = torch.tensor(0.0, device=target_out.device)
+            for i in range(len(random_masks)):
+                random_mask_loss += calc_masked_recon_loss(
+                    model=model,
+                    batch=batch,
+                    components=components,
+                    masks=random_masks[i],
+                    target_out=target_out,
+                    loss_type=config.output_loss_type,
+                )
+            random_mask_loss = random_mask_loss / len(random_masks)
+            total_loss += config.random_mask_recon_coeff * random_mask_loss
+            loss_terms["loss/random_mask_reconstruction"] = random_mask_loss.item()
+
+        ####### layerwise recon loss #######
         if config.layerwise_recon_coeff is not None:
             layerwise_recon_loss = calc_layerwise_recon_loss(
-                param_names=param_names,
-                target_model=target_model,
-                spd_model=model,
+                model=model,
                 batch=batch,
                 device=device,
+                components=components,
                 masks=[masks],
                 target_out=target_out,
-                has_instance_dim=has_instance_dim,
+                loss_type=config.output_loss_type,
             )
+            total_loss += config.layerwise_recon_coeff * layerwise_recon_loss
+            loss_terms["loss/layerwise_reconstruction"] = layerwise_recon_loss.item()
 
-        layerwise_random_recon_loss = None
+        ####### layerwise random recon loss #######
         if config.layerwise_random_recon_coeff is not None:
             layerwise_random_masks = calc_random_masks(
                 masks=masks, n_random_masks=config.n_random_masks
             )
             layerwise_random_recon_loss = calc_layerwise_recon_loss(
-                param_names=param_names,
-                target_model=target_model,
-                spd_model=model,
+                model=model,
                 batch=batch,
                 device=device,
+                components=components,
                 masks=layerwise_random_masks,
                 target_out=target_out,
-                has_instance_dim=has_instance_dim,
+                loss_type=config.output_loss_type,
             )
+            total_loss += config.layerwise_random_recon_coeff * layerwise_random_recon_loss
+            loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
 
-        loss_terms = {
-            "param_match_loss": (param_match_loss, config.param_match_coeff),
-            "out_recon_loss": (out_recon_loss, config.out_recon_coeff),
-            "lp_sparsity_loss": (lp_sparsity_loss, config.lp_sparsity_coeff),
-            "masked_recon_loss": (masked_recon_loss, config.masked_recon_coeff),
-            "act_recon_loss": (act_recon_loss, config.act_recon_coeff),
-            "random_masks_loss": (random_masks_loss, config.random_mask_recon_coeff),
-            "layerwise_recon_loss": (layerwise_recon_loss, config.layerwise_recon_coeff),
-            "layerwise_random_recon_loss": (
-                layerwise_random_recon_loss,
-                config.layerwise_random_recon_coeff,
-            ),
-        }
-        # Add up the loss terms
-        loss = torch.tensor(0.0, device=device)
-        for loss_name, (loss_term, coeff) in loss_terms.items():
-            if coeff is not None:
-                assert loss_term is not None, f"{loss_name} is None but coeff is not"
-                loss = loss + coeff * loss_term.mean()  # Mean over n_instances dimension
+        ####### lp sparsity loss #######
+        lp_sparsity_loss = calc_lp_sparsity_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)
+        total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
+        loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
 
-        # Logging
-        if step % config.print_freq == 0:
-            mask_l_zero = calc_mask_l_zero(masks=masks)
-            tqdm.write(f"Step {step}")
-            tqdm.write(f"Total loss: {loss.item()}")
-            tqdm.write(f"lr: {step_lr}")
-            for loss_name, (val, _) in loss_terms.items():
-                if val is not None:
-                    val_repr = f"\n{val.tolist()}" if val.numel() > 1 else f" {val.item()}"
-                    tqdm.write(f"{loss_name}:{val_repr}")
-
-            if config.wandb_project:
-                metrics = {
-                    "pnorm": config.pnorm,
-                    "lr": step_lr,
-                    "total_loss": loss.item(),
-                    **{"mask_l0_" + k: v for k, v in mask_l_zero.items()},
-                    **{
-                        name: val.mean().item() if val is not None else None
-                        for name, (val, _) in loss_terms.items()
-                    },
-                }
-                wandb.log(metrics, step=step)
-
-        # Make plots
-        if (
-            plot_results_fn is not None
-            and config.image_freq is not None
-            and step % config.image_freq == 0
-            and (step > 0 or config.image_on_first_step)
-        ):
-            fig_dict = plot_results_fn(
-                model=model,
-                target_model=target_model,
-                step=step,
-                out_dir=out_dir,
+        ####### Schatten loss #######
+        if config.schatten_coeff is not None:
+            schatten_loss = calc_schatten_loss(
+                sparsity_masks=sparsity_masks,
+                pnorm=config.pnorm,
+                components=components,
                 device=device,
-                config=config,
-                masks=masks,
-                gates=gates,
-                batch=batch,
             )
-            if config.wandb_project:
-                wandb.log(
-                    {k: wandb.Image(v) for k, v in fig_dict.items()},
-                    step=step,
-                )
-                if out_dir is not None:
-                    for k, v in fig_dict.items():
-                        v.savefig(out_dir / f"{k}_{step}.png")
-                        tqdm.write(f"Saved plot to {out_dir / f'{k}_{step}.png'}")
+            total_loss += config.schatten_coeff * schatten_loss
+            loss_terms["loss/schatten_loss"] = schatten_loss.item()
 
-        # Save model
+        ####### output recon loss #######
+        if config.out_recon_coeff is not None:
+            masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
+            out_recon_loss = calc_masked_recon_loss(
+                model=model,
+                batch=batch,
+                components=components,
+                masks=masks_all_ones,
+                target_out=target_out,
+                loss_type=config.output_loss_type,
+            )
+            total_loss += config.out_recon_coeff * out_recon_loss
+            loss_terms["loss/output_reconstruction"] = out_recon_loss.item()
+
+        ####### embedding recon loss #######
+        if config.embedding_recon_coeff is not None:
+            assert len(components) == 1, "Only one embedding component is supported"
+            component = list(components.values())[0]
+            assert isinstance(component, EmbeddingComponent)
+            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            embedding_recon_loss = calc_embedding_recon_loss(
+                model=model,
+                batch=batch,
+                component=component,
+                masks=random_masks,
+                embed_module_name=next(iter(components.keys())),
+                unembed=config.is_embed_unembed_recon,
+            )
+            total_loss += config.embedding_recon_coeff * embedding_recon_loss
+            loss_terms["loss/embedding_reconstruction"] = embedding_recon_loss.item()
+
+        log_data["loss/total"] = total_loss.item()
+        log_data.update(loss_terms)
+
+        with torch.inference_mode():
+            # --- Logging --- #
+            if step % config.print_freq == 0:
+                tqdm.write(f"--- Step {step} ---")
+                tqdm.write(f"LR: {step_lr:.6f}")
+                tqdm.write(f"Total Loss: {log_data['loss/total']:.7f}")
+                for name, value in loss_terms.items():
+                    if value is not None:
+                        tqdm.write(f"{name}: {value:.7f}")
+
+                masked_component_logits = model.forward_with_components(
+                    batch, components=components, masks=masks
+                )
+                unmasked_component_logits = model.forward_with_components(
+                    batch, components=components, masks=None
+                )
+
+                for layer_name, layer_alive_components in alive_components.items():
+                    if step == 0:
+                        break
+                    log_data[f"{layer_name}/n_alive_components_01"] = (
+                        layer_alive_components.sum().item()
+                    )
+                    alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
+
+                target_logits = model(batch)
+
+                unmasked_kl_loss = calc_kl_divergence_lm(
+                    pred=unmasked_component_logits, target=target_logits
+                )
+                masked_kl_loss = calc_kl_divergence_lm(
+                    pred=masked_component_logits, target=target_logits
+                )
+
+                if config.log_ce_losses:
+                    ###### CE vs true labels #######
+                    flat_all_component_logits = einops.rearrange(
+                        unmasked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    flat_masked_component_logits = einops.rearrange(
+                        masked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    flat_batch = batch.flatten()
+                    unmasked_ce_loss = F.cross_entropy(
+                        input=flat_all_component_logits[:-1], target=flat_batch[1:]
+                    )
+                    masked_ce_loss = F.cross_entropy(
+                        input=flat_masked_component_logits[:-1], target=flat_batch[1:]
+                    )
+
+                    flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
+                    target_ce_loss = F.cross_entropy(
+                        input=flat_target_logits[:-1], target=flat_batch[1:]
+                    )
+
+                    # --- CE when every component is fully masked (all-zero masks) --- #
+                    zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+                    zero_masked_component_logits = model.forward_with_components(
+                        batch, components=components, masks=zero_masks
+                    )
+                    flat_zero_masked_component_logits = einops.rearrange(
+                        zero_masked_component_logits, "... vocab -> (...) vocab"
+                    )
+                    zero_masked_ce_loss = F.cross_entropy(
+                        input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+                    )
+                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+
+                embed_mask_table = create_embed_mask_sample_table(masks)
+                if embed_mask_table is not None:
+                    log_data["misc/embed_mask_sample"] = embed_mask_table
+
+                log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
+                log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
+
+                if config.wandb_project:
+                    mask_l_zero = calc_mask_l_zero(masks=masks)
+                    for layer_name, layer_mask_l_zero in mask_l_zero.items():
+                        log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
+                    wandb.log(log_data, step=step)
+
+            # --- Plotting --- #
+            if (
+                config.image_freq is not None
+                and step % config.image_freq == 0
+                and (step > 0 or config.image_on_first_step)
+            ):
+                logger.info(f"Step {step}: Generating plots...")
+                fig_dict = {}
+                if plot_results_fn is not None:
+                    fig_dict = plot_results_fn(
+                        model=model,
+                        components=components,
+                        gates=gates,
+                        batch_shape=batch.shape,
+                        device=device,
+                    )
+
+                # plot_mask_histograms returns a dict of figures, so we need to merge it
+                mask_histogram_figs = plot_mask_histograms(masks=masks)
+                fig_dict.update(mask_histogram_figs)
+
+                mean_component_activation_counts = component_activation_statistics(
+                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                )[1]
+                assert mean_component_activation_counts is not None
+                fig_dict["mean_component_activation_counts"] = (
+                    plot_mean_component_activation_counts(
+                        mean_component_activation_counts=mean_component_activation_counts,
+                    )
+                )
+
+                if config.wandb_project:
+                    wandb.log(
+                        {k: wandb.Image(v) for k, v in fig_dict.items()},
+                        step=step,
+                    )
+                    if out_dir is not None:
+                        for k, v in fig_dict.items():
+                            v.savefig(out_dir / f"{k}_{step}.png")
+                            tqdm.write(f"Saved plot to {out_dir / f'{k}_{step}.png'}")
+
+        # --- Saving Checkpoint --- #
         if (
             (config.save_freq is not None and step % config.save_freq == 0 and step > 0)
             or step == config.steps
         ) and out_dir is not None:
-            torch.save(model.state_dict(), out_dir / f"spd_model_{step}.pth")
-            tqdm.write(f"Saved model to {out_dir / f'spd_model_{step}.pth'}")
+            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
+            logger.info(f"Saved model, optimizer, and out_dir to {out_dir}")
             if config.wandb_project:
-                wandb.save(str(out_dir / f"spd_model_{step}.pth"), base_path=out_dir, policy="now")
+                wandb.save(str(out_dir / f"model_{step}.pth"), base_path=str(out_dir), policy="now")
+                wandb.save(
+                    str(out_dir / f"optimizer_{step}.pth"), base_path=str(out_dir), policy="now"
+                )
 
+        # --- Backward Pass & Optimize --- #
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
-            loss.backward(retain_graph=True)
+            total_loss.backward(retain_graph=True)
 
             if step % config.print_freq == 0 and config.wandb_project:
                 # Calculate gradient norm
-                grad_norm: float = 0.0
+                grad_norm: Float[Tensor, ""] = torch.zeros((), device=device)
                 for param in model.parameters():
                     if param.grad is not None:
-                        grad_norm += param.grad.data.norm()  # type: ignore
-                wandb.log({"grad_norm": grad_norm}, step=step)
+                        grad_norm += param.grad.data.flatten().pow(2).sum()  # type: ignore
+                grad_norm_val = grad_norm.sqrt().item()
+                wandb.log({"grad_norm": grad_norm_val}, step=step)
 
             if config.unit_norm_matrices:
                 model.fix_normalized_adam_gradients()
 
-            opt.step()
+            optimizer.step()
+
+    logger.info("Finished training loop.")

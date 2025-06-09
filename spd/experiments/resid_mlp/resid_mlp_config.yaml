@@ -1,65 +1,153 @@
 # ########## 1 layer ##########
+# --- WandB ---
 wandb_project: spd-resid-mlp
 wandb_run_name: null
 wandb_run_name_prefix: ""
+
+# --- General ---
 unit_norm_matrices: false
 seed: 0
 m: 100
-param_match_coeff: 1.0
-masked_recon_coeff: 1.0
-# act_recon_coeff: 1
-random_mask_recon_coeff: 1.0
 n_random_masks: 1
-n_gate_hidden_neurons: null
+n_gate_hidden_neurons: 16
 # n_gate_hidden_neurons: 8
-layerwise_recon_coeff: 1.0
+target_module_patterns:
+  - "layers.*.mlp_in"
+  - "layers.*.mlp_out"
+
+# --- Loss Coefficients ---
+param_match_coeff: 1.0
+out_recon_coeff: 0.0
+masked_recon_coeff: null
+random_mask_recon_coeff: 1.0
+layerwise_recon_coeff: null
 layerwise_random_recon_coeff: 1.0
-pnorm: 0.9
-lp_sparsity_coeff: 3e-2
-batch_size: 256
-steps: 20_000
+lp_sparsity_coeff: 1e-5
+pnorm: 2
+output_loss_type: mse
+
+# --- Training ---
+batch_size: 2048
+steps: 30_000
+lr: 2e-3
+lr_schedule: constant
+lr_warmup_pct: 0.0
+n_eval_steps: 100
+
+# --- Logging & Saving ---
 image_freq: 5_000
-print_freq: 100
-save_freq: 10_000
-lr: 1e-3
-lr_schedule: cosine
-lr_warmup_pct: 0.01
 image_on_first_step: true
-init_from_target_model: false
+print_freq: 100
+save_freq: null
+
+# --- Pretrained model info ---
+pretrained_model_class: "spd.experiments.resid_mlp.models.ResidualMLP"
+pretrained_model_path: "wandb:spd-train-resid-mlp/runs/94k7vefb"
+
+# --- Task Specific ---
 task_config:
   task_name: residual_mlp
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: wandb:spd-train-resid-mlp/runs/zas5yjdl # 1 layer
 
-
-########## 2 layer ##########
+# ########## 2 layers ##########
+# # --- WandB ---
 # wandb_project: spd-resid-mlp
 # wandb_run_name: null
 # wandb_run_name_prefix: ""
+
+# # --- General ---
 # unit_norm_matrices: false
 # seed: 0
-# m: 200
-# param_match_coeff: 1.0
-# masked_recon_coeff: 2.0
-# act_recon_coeff: 1.0
-# random_mask_recon_coeff: 1.0
+# m: 400
 # n_random_masks: 1
-# n_gate_hidden_neurons: 8
-# pnorm: 0.9
-# lp_sparsity_coeff: 3e-3
-# batch_size: 256
-# steps: 10_000
+# n_gate_hidden_neurons: 16
+# target_module_patterns:
+#   - "layers.*.mlp_in"
+#   - "layers.*.mlp_out"
+
+# # --- Loss Coefficients ---
+# param_match_coeff: 1.0
+# out_recon_coeff: 0.0
+# masked_recon_coeff: null
+# random_mask_recon_coeff: 1.0
+# layerwise_recon_coeff: null
+# layerwise_random_recon_coeff: 1.0
+# lp_sparsity_coeff: 1e-5
+# pnorm: 2
+# output_loss_type: mse
+
+# # --- Training ---
+# batch_size: 2048
+# steps: 50_000
+# lr: 2e-3
+# lr_schedule: constant
+# lr_warmup_pct: 0.00
+# n_eval_steps: 100
+
+# # --- Logging & Saving ---
 # image_freq: 5_000
-# print_freq: 500
-# save_freq: 10_000
-# lr: 1e-3
-# lr_schedule: cosine
-# lr_warmup_pct: 0.01
 # image_on_first_step: true
-# init_from_target_model: false
+# print_freq: 500
+# save_freq: null
+
+# # --- Pretrained model info ---
+# pretrained_model_class: "spd.experiments.resid_mlp.models.ResidualMLP"
+# pretrained_model_path: wandb:spd-train-resid-mlp/runs/ouplwggr # 2 layers
+
+# # --- Task Specific ---
 # task_config:
 #   task_name: residual_mlp
 #   feature_probability: 0.01
 #   data_generation_type: "at_least_zero_active"
-#   pretrained_model_path: wandb:spd-train-resid-mlp/runs/sv23xrhj # 2 layer
+
+# ########## 3 layers ##########
+# # --- WandB ---
+# wandb_project: spd-resid-mlp
+# wandb_run_name: null
+# wandb_run_name_prefix: ""
+
+# # --- General ---
+# unit_norm_matrices: false
+# seed: 0
+# m: 500
+# n_random_masks: 1
+# n_gate_hidden_neurons: 128
+# target_module_patterns:
+#   - "layers.*.mlp_in"
+#   - "layers.*.mlp_out"
+
+# # --- Loss Coefficients ---
+# param_match_coeff: 1.0
+# out_recon_coeff: 0.0
+# masked_recon_coeff: null
+# random_mask_recon_coeff: 1.0
+# layerwise_recon_coeff: null
+# layerwise_random_recon_coeff: 1.0
+# lp_sparsity_coeff: 5e-6
+# pnorm: 2
+# output_loss_type: mse
+
+# # --- Training ---
+# batch_size: 2048
+# steps: 200_000
+# lr: 1e-3
+# lr_schedule: constant
+# lr_warmup_pct: 0.00
+# n_eval_steps: 100
+
+# # --- Logging & Saving ---
+# image_freq: 5_000
+# image_on_first_step: true
+# print_freq: 500
+# save_freq: null
+
+# # --- Pretrained model info ---
+# pretrained_model_class: "spd.experiments.resid_mlp.models.ResidualMLP"
+# pretrained_model_path: wandb:spd-train-resid-mlp/runs/xyyt2ylg # 3 layers
+
+# # --- Task Specific ---
+# task_config:
+#   task_name: residual_mlp
+#   feature_probability: 0.01
+#   data_generation_type: "at_least_zero_active"

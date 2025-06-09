@@ -24,7 +24,6 @@ dependencies = [
     "streamlit",
     "streamlit-antd-components",
     "datasets",
-    "simple-stories-train"
 ]
 
 [project.optional-dependencies]

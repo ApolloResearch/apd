@@ -1,6 +1,6 @@
 import torch
 
-from spd.run_spd import _calc_param_mse
+from spd.losses import _calc_param_mse
 
 
 class TestCalcParamMatchLoss:
@@ -51,25 +51,4 @@ class TestCalcParamMatchLoss:
         # Add together 24 + 6 = 30
         # Divide by n_params: 30 / (18+18) = 5/6
         expected = torch.tensor(5.0 / 6.0)
-        assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
-
-    def test_calc_param_match_loss_multiple_instances(self):
-        As = [torch.ones(2, 2, 3)]
-        Bs = [torch.ones(2, 3, 2)]
-        n_params = 2 * 3 * 2
-        target_params = {
-            "layer1": torch.tensor([[[2.0, 2.0], [2.0, 2.0]], [[1.0, 1.0], [1.0, 1.0]]])
-        }
-        spd_params = {"layer1": As[0] @ Bs[0]}
-        result = _calc_param_mse(
-            params1=target_params,
-            params2=spd_params,
-            n_params=n_params,
-            device="cpu",
-        )
-
-        # AB [n_instances=2, d_in=2, d_out=2]: [[[3, 3], [3, 3]], [[3, 3], [3, 3]]]
-        # diff^2: [[[1, 1], [1, 1]], [[4, 4], [4, 4]]]
-        # Sum together and divide by n_params: [4, 16] / 12 = [1/3, 4/3]
-        expected = torch.tensor([1.0 / 3.0, 4.0 / 3.0])
         assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"

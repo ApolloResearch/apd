@@ -1,10 +1,11 @@
+# TODO: Make compatible
 # %% Imports
 
 import matplotlib.pyplot as plt
 import torch
 
 from spd.experiments.resid_mlp.models import (
-    ResidualMLPModel,
+    ResidualMLP,
 )
 from spd.experiments.resid_mlp.plotting import (
     plot_all_relu_curves,
@@ -15,7 +16,7 @@ from spd.experiments.resid_mlp.plotting import (
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
 from spd.settings import REPO_ROOT
-from spd.types import ModelPath
+from spd.spd_types import ModelPath
 from spd.utils import set_seed
 
 # %% Load model and config
@@ -25,13 +26,13 @@ out_dir.mkdir(parents=True, exist_ok=True)
 
 set_seed(0)
 device = "cpu" if torch.cuda.is_available() else "cpu"
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
+# path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/otxwx80v"  # 1 layer new code
 # path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
-model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
+model, train_config_dict, label_coeffs = ResidualMLP.from_pretrained(path)
 model = model.to(device)
 train_config = ResidMLPTrainConfig(**train_config_dict)
 dataset = ResidualMLPDataset(
-    n_instances=train_config.resid_mlp_config.n_instances,
     n_features=train_config.resid_mlp_config.n_features,
     feature_probability=train_config.feature_probability,
     device=device,

@@ -7,12 +7,15 @@ parameters:
   seed:
     values: [0]
   lr:
-    values: [1e-2]
-  layerwise_random_recon_coeff:
-    values: [1e-1, 1e-2]
+    values: [2e-3, 1e-3, 3e-4, 1e-4]
+  # layerwise_random_recon_coeff:
+  #   values: [1e-1]
+  # embedding_recon_coeff:
+  #   values: [1, 1e-2, 1e-4]
+
 
 command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/lm/lm_config.yaml
+- spd/experiments/lm/ss_config.yaml # Runs simplestories
