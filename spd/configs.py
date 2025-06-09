@@ -285,9 +285,4 @@ class Config(BaseModel):
             assert self.lr_exponential_halflife is not None, (
                 "lr_exponential_halflife must be set if lr_schedule is exponential"
             )
-        # Schatten norm schould be null unless the model is an LM
-        if self.task_config.task_name != "lm":
-            assert self.schatten_coeff is None, (
-                "schatten_coeff should be null unless the model is an LM"
-            )
         return self
