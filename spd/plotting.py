@@ -425,3 +425,48 @@ def plot_mask_histograms(
         fig_dict[f"mask_vals_{layer_name}"] = fig
 
     return fig_dict
+
+
+def create_toy_model_plot_results(
+    model: ComponentModel,
+    components: dict[str, LinearComponent | EmbeddingComponent],
+    gates: dict[str, Gate | GateMLP],
+    batch_shape: tuple[int, ...],
+    device: str | torch.device,
+    **_,
+) -> dict[str, plt.Figure]:
+    """Create standard plotting results for decomposition experiments.
+
+    This function is used by both resid_mlp and tms experiments to generate
+    mask value plots and AB matrix plots.
+
+    Args:
+        model: The ComponentModel
+        components: Dictionary of components
+        gates: Dictionary of gates
+        batch_shape: Shape of the batch
+        device: Device to use
+        **_: Additional keyword arguments (ignored)
+
+    Returns:
+        Dictionary of figures
+    """
+    fig_dict = {}
+
+    figures, all_perm_indices_sparsity_masks = plot_mask_vals(
+        model=model,
+        components=components,
+        gates=gates,
+        batch_shape=batch_shape,
+        device=device,
+        input_magnitude=0.75,
+    )
+
+    # Merge the figures dict into fig_dict
+    fig_dict.update(figures)
+
+    # Use sparsity masks permutation for AB matrices (this was the original behavior)
+    fig_dict["AB_matrices"] = plot_AB_matrices(
+        components=components, all_perm_indices=all_perm_indices_sparsity_masks
+    )
+    return fig_dict

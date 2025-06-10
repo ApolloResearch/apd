@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import fire
-import matplotlib.pyplot as plt
 import torch
 import wandb
 import yaml
@@ -18,14 +17,7 @@ from spd.data_utils import DatasetGeneratedDataLoader
 from spd.experiments.resid_mlp.models import ResidualMLP
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
-from spd.models.component_model import ComponentModel
-from spd.models.components import (
-    EmbeddingComponent,
-    Gate,
-    GateMLP,
-    LinearComponent,
-)
-from spd.plotting import plot_AB_matrices, plot_mask_vals
+from spd.plotting import create_toy_model_plot_results
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import get_device, load_config, set_seed
 from spd.wandb_utils import init_wandb
@@ -48,35 +40,6 @@ def get_run_name(
         run_suffix = get_common_run_name_suffix(config)
         run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
     return config.wandb_run_name_prefix + run_suffix
-
-
-def resid_mlp_plot_results_fn(
-    model: ComponentModel,
-    components: dict[str, LinearComponent | EmbeddingComponent],
-    gates: dict[str, Gate | GateMLP],
-    batch_shape: tuple[int, ...],
-    device: str,
-    **_,
-) -> dict[str, plt.Figure]:
-    fig_dict = {}
-
-    figures, all_perm_indices_sparsity_masks = plot_mask_vals(
-        model=model,
-        components=components,
-        gates=gates,
-        batch_shape=batch_shape,
-        device=device,
-        input_magnitude=0.75,
-    )
-
-    # Merge the figures dict into fig_dict
-    fig_dict.update(figures)
-
-    # Use sparsity masks permutation for AB matrices (this was the original behavior)
-    fig_dict["AB_matrices"] = plot_AB_matrices(
-        components=components, all_perm_indices=all_perm_indices_sparsity_masks
-    )
-    return fig_dict
 
 
 def save_target_model_info(
@@ -177,7 +140,7 @@ def main(
         eval_loader=eval_loader,
         n_eval_steps=config.n_eval_steps,
         out_dir=out_dir,
-        plot_results_fn=resid_mlp_plot_results_fn,
+        plot_results_fn=create_toy_model_plot_results,
     )
 
     if config.wandb_project:

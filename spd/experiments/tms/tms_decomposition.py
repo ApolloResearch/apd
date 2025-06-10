@@ -15,9 +15,9 @@ import yaml
 
 from spd.configs import Config, TMSTaskConfig
 from spd.data_utils import DatasetGeneratedDataLoader, SparseFeatureDataset
-from spd.experiments.resid_mlp.resid_mlp_decomposition import resid_mlp_plot_results_fn
 from spd.experiments.tms.models import TMSModel, TMSModelConfig
 from spd.log import logger
+from spd.plotting import create_toy_model_plot_results
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import get_device, load_config, set_seed
 from spd.wandb_utils import init_wandb
@@ -120,7 +120,7 @@ def main(
         eval_loader=eval_loader,
         n_eval_steps=config.n_eval_steps,
         out_dir=out_dir,
-        plot_results_fn=resid_mlp_plot_results_fn,
+        plot_results_fn=create_toy_model_plot_results,
         tied_weights=tied_weights,
     )
 
