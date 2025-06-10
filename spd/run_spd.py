@@ -19,10 +19,10 @@ from spd.configs import Config
 from spd.log import logger
 from spd.losses import (
     calc_embedding_recon_loss,
+    calc_faithfulness_loss,
     calc_importance_loss,
-    calc_layerwise_recon_loss,
+    calc_layerwise_masked_recon_loss,
     calc_masked_recon_loss,
-    calc_param_match_loss,
     calc_schatten_loss,
 )
 from spd.models.component_model import ComponentModel, init_As_and_Bs_
@@ -53,8 +53,8 @@ def get_common_run_name_suffix(config: Config) -> str:
     if config.masked_recon_coeff is not None:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
         run_suffix += f"nrandmasks{config.n_stochastic_masks}_"
-    if config.stochastic_mask_recon_coeff is not None:
-        run_suffix += f"randrecon{config.stochastic_mask_recon_coeff:.2e}_"
+    if config.stochastic_masked_recon_coeff is not None:
+        run_suffix += f"randrecon{config.stochastic_masked_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
     run_suffix += f"lpsp{config.importance_loss_coeff:.2e}_"
     run_suffix += f"C{config.C}_"
@@ -62,6 +62,67 @@ def get_common_run_name_suffix(config: Config) -> str:
     run_suffix += f"lr{config.lr:.2e}_"
     run_suffix += f"bs{config.batch_size}_"
     return run_suffix
+
+
+def calc_ce_losses(
+    model: ComponentModel,
+    batch: Int[Tensor, "..."],
+    components: dict[str, LinearComponent | EmbeddingComponent],
+    masks: dict[str, Float[Tensor, "..."]],
+    unmasked_component_logits: Float[Tensor, "..."],
+    masked_component_logits: Float[Tensor, "..."],
+    target_logits: Float[Tensor, "..."],
+) -> dict[str, float]:
+    """Calculate cross-entropy losses for various masking scenarios.
+
+    Args:
+        model: The component model
+        batch: Input batch
+        components: Dictionary of components
+        masks: Dictionary of masks for components
+        unmasked_component_logits: Logits from unmasked components
+        masked_component_logits: Logits from masked components
+        target_logits: Target model logits
+
+    Returns:
+        Dictionary containing CE losses for different scenarios
+    """
+    ce_losses = {}
+
+    # Flatten logits and batch for CE calculation
+    flat_all_component_logits = einops.rearrange(
+        unmasked_component_logits, "... vocab -> (...) vocab"
+    )
+    flat_masked_component_logits = einops.rearrange(
+        masked_component_logits, "... vocab -> (...) vocab"
+    )
+    flat_batch = batch.flatten()
+
+    # CE vs true labels
+    unmasked_ce_loss = F.cross_entropy(input=flat_all_component_logits[:-1], target=flat_batch[1:])
+    masked_ce_loss = F.cross_entropy(input=flat_masked_component_logits[:-1], target=flat_batch[1:])
+
+    flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
+    target_ce_loss = F.cross_entropy(input=flat_target_logits[:-1], target=flat_batch[1:])
+
+    # CE when every component is fully masked (all-zero masks)
+    zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+    zero_masked_component_logits = model.forward_with_components(
+        batch, components=components, masks=zero_masks
+    )
+    flat_zero_masked_component_logits = einops.rearrange(
+        zero_masked_component_logits, "... vocab -> (...) vocab"
+    )
+    zero_masked_ce_loss = F.cross_entropy(
+        input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+    )
+
+    ce_losses["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+    ce_losses["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+    ce_losses["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+    ce_losses["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+
+    return ce_losses
 
 
 def optimize(
@@ -180,15 +241,12 @@ def optimize(
         total_loss = torch.tensor(0.0, device=device)
         loss_terms = {}
 
-        ####### param match loss #######
-        param_match_loss_val = calc_param_match_loss(
-            components=components,
-            target_model=model.model,
-            n_params=n_params,
-            device=device,
+        ####### faithfulness loss #######
+        faithfulness_loss = calc_faithfulness_loss(
+            components=components, target_model=model.model, n_params=n_params, device=device
         )
-        total_loss += config.param_match_coeff * param_match_loss_val
-        loss_terms["loss/parameter_matching"] = param_match_loss_val.item()
+        total_loss += config.faithfulness_coeff * faithfulness_loss
+        loss_terms["loss/parameter_matching"] = faithfulness_loss.item()
 
         ####### masked recon loss #######
         if config.masked_recon_coeff is not None:
@@ -203,8 +261,8 @@ def optimize(
             total_loss += config.masked_recon_coeff * masked_recon_loss
             loss_terms["loss/masked_reconstruction"] = masked_recon_loss.item()
 
-        ####### random mask recon loss #######
-        if config.stochastic_mask_recon_coeff is not None:
+        ####### stochastic masked recon loss #######
+        if config.stochastic_masked_recon_coeff is not None:
             random_masks = calc_random_masks(
                 masks=masks, n_stochastic_masks=config.n_stochastic_masks
             )
@@ -219,12 +277,12 @@ def optimize(
                     loss_type=config.output_loss_type,
                 )
             random_mask_loss = random_mask_loss / len(random_masks)
-            total_loss += config.stochastic_mask_recon_coeff * random_mask_loss
-            loss_terms["loss/stochastic_mask_reconstruction"] = random_mask_loss.item()
+            total_loss += config.stochastic_masked_recon_coeff * random_mask_loss
+            loss_terms["loss/stochastic_masked_reconstruction"] = random_mask_loss.item()
 
-        ####### layerwise recon loss #######
-        if config.layerwise_recon_coeff is not None:
-            layerwise_recon_loss = calc_layerwise_recon_loss(
+        ####### layerwise masked recon loss #######
+        if config.layerwise_masked_recon_coeff is not None:
+            layerwise_masked_recon_loss = calc_layerwise_masked_recon_loss(
                 model=model,
                 batch=batch,
                 device=device,
@@ -233,15 +291,15 @@ def optimize(
                 target_out=target_out,
                 loss_type=config.output_loss_type,
             )
-            total_loss += config.layerwise_recon_coeff * layerwise_recon_loss
-            loss_terms["loss/layerwise_reconstruction"] = layerwise_recon_loss.item()
+            total_loss += config.layerwise_masked_recon_coeff * layerwise_masked_recon_loss
+            loss_terms["loss/layerwise_masked_reconstruction"] = layerwise_masked_recon_loss.item()
 
-        ####### layerwise random recon loss #######
-        if config.layerwise_stochastic_recon_coeff is not None:
+        ####### layerwise stochastic masked recon loss #######
+        if config.layerwise_stochastic_masked_recon_coeff is not None:
             layerwise_stochastic_masks = calc_random_masks(
                 masks=masks, n_stochastic_masks=config.n_stochastic_masks
             )
-            layerwise_stochastic_recon_loss = calc_layerwise_recon_loss(
+            layerwise_stochastic_masked_recon_loss = calc_layerwise_masked_recon_loss(
                 model=model,
                 batch=batch,
                 device=device,
@@ -250,9 +308,12 @@ def optimize(
                 target_out=target_out,
                 loss_type=config.output_loss_type,
             )
-            total_loss += config.layerwise_stochastic_recon_coeff * layerwise_stochastic_recon_loss
-            loss_terms["loss/layerwise_stochastic_reconstruction"] = (
-                layerwise_stochastic_recon_loss.item()
+            total_loss += (
+                config.layerwise_stochastic_masked_recon_coeff
+                * layerwise_stochastic_masked_recon_loss
+            )
+            loss_terms["loss/layerwise_stochastic_masked_reconstruction"] = (
+                layerwise_stochastic_masked_recon_loss.item()
             )
 
         ####### importance loss #######
@@ -317,20 +378,20 @@ def optimize(
                     if value is not None:
                         tqdm.write(f"{name}: {value:.7f}")
 
+                if step > 0:
+                    for layer_name, layer_alive_components in alive_components.items():
+                        log_data[f"{layer_name}/n_alive_components_01"] = (
+                            layer_alive_components.sum().item()
+                        )
+                        alive_components[layer_name] = torch.zeros(config.C, device=device).bool()
+
+                # Calculate component logits and KL losses
                 masked_component_logits = model.forward_with_components(
                     batch, components=components, masks=masks
                 )
                 unmasked_component_logits = model.forward_with_components(
                     batch, components=components, masks=None
                 )
-
-                for layer_name, layer_alive_components in alive_components.items():
-                    if step == 0:
-                        break
-                    log_data[f"{layer_name}/n_alive_components_01"] = (
-                        layer_alive_components.sum().item()
-                    )
-                    alive_components[layer_name] = torch.zeros(config.C, device=device).bool()
 
                 target_logits = model(batch)
 
@@ -341,49 +402,24 @@ def optimize(
                     pred=masked_component_logits, target=target_logits
                 )
 
+                log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
+                log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
+
                 if config.log_ce_losses:
-                    ###### CE vs true labels #######
-                    flat_all_component_logits = einops.rearrange(
-                        unmasked_component_logits, "... vocab -> (...) vocab"
+                    ce_losses = calc_ce_losses(
+                        model=model,
+                        batch=batch,
+                        components=components,
+                        masks=masks,
+                        unmasked_component_logits=unmasked_component_logits,
+                        masked_component_logits=masked_component_logits,
+                        target_logits=target_logits,
                     )
-                    flat_masked_component_logits = einops.rearrange(
-                        masked_component_logits, "... vocab -> (...) vocab"
-                    )
-                    flat_batch = batch.flatten()
-                    unmasked_ce_loss = F.cross_entropy(
-                        input=flat_all_component_logits[:-1], target=flat_batch[1:]
-                    )
-                    masked_ce_loss = F.cross_entropy(
-                        input=flat_masked_component_logits[:-1], target=flat_batch[1:]
-                    )
-
-                    flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
-                    target_ce_loss = F.cross_entropy(
-                        input=flat_target_logits[:-1], target=flat_batch[1:]
-                    )
-
-                    # --- CE when every component is fully masked (all-zero masks) --- #
-                    zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
-                    zero_masked_component_logits = model.forward_with_components(
-                        batch, components=components, masks=zero_masks
-                    )
-                    flat_zero_masked_component_logits = einops.rearrange(
-                        zero_masked_component_logits, "... vocab -> (...) vocab"
-                    )
-                    zero_masked_ce_loss = F.cross_entropy(
-                        input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
-                    )
-                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
-                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
-                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
-                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+                    log_data.update(ce_losses)
 
                 embed_mask_table = create_embed_mask_sample_table(masks)
                 if embed_mask_table is not None:
                     log_data["misc/embed_mask_sample"] = embed_mask_table
-
-                log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
-                log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
 
                 if config.wandb_project:
                     mask_l_zero = calc_mask_l_zero(masks=masks)
@@ -408,7 +444,6 @@ def optimize(
                         device=device,
                     )
 
-                # plot_mask_histograms returns a dict of figures, so we need to merge it
                 mask_histogram_figs = plot_mask_histograms(masks=masks)
                 fig_dict.update(mask_histogram_figs)
 
@@ -458,9 +493,6 @@ def optimize(
                         grad_norm += param.grad.data.flatten().pow(2).sum()  # type: ignore
                 grad_norm_val = grad_norm.sqrt().item()
                 wandb.log({"grad_norm": grad_norm_val}, step=step)
-
-            if config.unit_norm_matrices:
-                model.fix_normalized_adam_gradients()
 
             optimizer.step()
 

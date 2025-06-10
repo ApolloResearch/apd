@@ -118,7 +118,7 @@ def calc_importance_loss(
     return total_loss.sum(dim=-1).mean()
 
 
-def calc_layerwise_recon_loss(
+def calc_layerwise_masked_recon_loss(
     model: ComponentModel,
     batch: Int[Tensor, "..."],
     device: str,
@@ -171,7 +171,7 @@ def calc_masked_recon_loss(
     return loss
 
 
-def _calc_param_mse(
+def _calc_tensors_mse(
     params1: dict[str, Float[Tensor, "d_in d_out"]],
     params2: dict[str, Float[Tensor, "d_in d_out"]],
     n_params: int,
@@ -187,13 +187,13 @@ def _calc_param_mse(
         n_params: The number of parameters in the model
         device: The device to use for calculations
     """
-    param_match_loss = torch.tensor(0.0, device=device)
+    faithfulness_loss = torch.tensor(0.0, device=device)
     for name in params1:
-        param_match_loss = param_match_loss + ((params2[name] - params1[name]) ** 2).sum()
-    return param_match_loss / n_params
+        faithfulness_loss = faithfulness_loss + ((params2[name] - params1[name]) ** 2).sum()
+    return faithfulness_loss / n_params
 
 
-def calc_param_match_loss(
+def calc_faithfulness_loss(
     components: dict[str, LinearComponent | EmbeddingComponent],
     target_model: nn.Module,
     n_params: int,
@@ -210,10 +210,10 @@ def calc_param_match_loss(
         target_params[comp_name] = submodule.weight
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
-    param_mse = _calc_param_mse(
+    faithfulness_loss = _calc_tensors_mse(
         params1=component_params,
         params2=target_params,
         n_params=n_params,
         device=device,
     )
-    return param_mse
+    return faithfulness_loss

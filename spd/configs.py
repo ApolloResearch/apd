@@ -102,10 +102,6 @@ class Config(BaseModel):
 
     # --- General ---
     seed: int = Field(default=0, description="Random seed for reproducibility")
-    unit_norm_matrices: bool = Field(
-        default=False,
-        description="Whether to renormalise each A matrix so every column has unit 2-norm",
-    )
     C: PositiveInt = Field(
         ...,
         description="The number of subcomponents per layer",
@@ -124,7 +120,7 @@ class Config(BaseModel):
     )
 
     # --- Loss Coefficients
-    param_match_coeff: NonNegativeFloat | None = Field(
+    faithfulness_coeff: NonNegativeFloat | None = Field(
         default=1.0,
         description="Coefficient for matching parameters between components and target weights",
     )
@@ -132,15 +128,15 @@ class Config(BaseModel):
         default=None,
         description="Coefficient for reconstruction loss with a deterministic mask",
     )
-    stochastic_mask_recon_coeff: NonNegativeFloat | None = Field(
+    stochastic_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
         description="Coefficient for reconstruction loss with stochastic masks",
     )
-    layerwise_recon_coeff: NonNegativeFloat | None = Field(
+    layerwise_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
         description="Coefficient for per-layer reconstruction loss (deterministic mask)",
     )
-    layerwise_stochastic_recon_coeff: NonNegativeFloat | None = Field(
+    layerwise_stochastic_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
         description="Coefficient for per-layer reconstruction loss with stochastic masks",
     )
@@ -273,8 +269,8 @@ class Config(BaseModel):
             logger.warning(f"masked_recon_coeff {msg}")
         if self.importance_loss_coeff == 0:
             logger.warning(f"importance_loss_coeff {msg}")
-        if self.param_match_coeff == 0:
-            logger.warning(f"param_match_coeff {msg}")
+        if self.faithfulness_coeff == 0:
+            logger.warning(f"faithfulness_coeff {msg}")
 
         # Check that lr_exponential_halflife is not None if lr_schedule is "exponential"
         if self.lr_schedule == "exponential":

@@ -286,7 +286,7 @@ def init_As_and_Bs_(
     1. Normalize every component to 1.
     2. Take inner product with original model
     3. This gives you roughly how much overlap there is with the target model.
-    4. Scale the Bs by this value (just so it doesn't interfere with config.unit_norm_matrices
+    4. Scale the Bs by this value (we can choose either matrix)
     """
     # NOTE: This may increase memory usage if done on GPU.
     for param_name, component in components.items():

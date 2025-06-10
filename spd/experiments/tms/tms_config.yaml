@@ -5,7 +5,6 @@
 # wandb_run_name_prefix: ""
 
 # # --- General ---
-# unit_norm_matrices: false
 # seed: 0
 # C: 20
 # n_stochastic_masks: 1
@@ -15,11 +14,11 @@
 # target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
 # # --- Loss Coefficients ---
-# param_match_coeff: 1.0
+# faithfulness_coeff: 1.0
 # masked_recon_coeff: null
-# random_stochastic_recon_coeff: 1
-# layerwise_recon_coeff: null
-# layerwise_stochastic_recon_coeff: 1.0
+# stochastic_masked_recon_coeff: 1
+# layerwise_masked_recon_coeff: null
+# layerwise_stochastic_masked_recon_coeff: 1.0
 # importance_loss_coeff: 3e-3
 # pnorm: 1.0
 # output_loss_type: mse
@@ -55,7 +54,6 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 
 # --- General ---
-unit_norm_matrices: false
 seed: 0
 C: 200
 n_stochastic_masks: 1
@@ -65,13 +63,13 @@ target_module_patterns: ["linear1", "linear2"]
 # target_module_patterns: ["linear1", "linear2", "hidden_layers.0"]
 
 # --- Loss Coefficients ---
-param_match_coeff: 1.0
+faithfulness_coeff: 1.0
 masked_recon_coeff: null
 pnorm: 2.0
 importance_loss_coeff: 1e-4
-random_stochastic_recon_coeff: 1
-layerwise_recon_coeff: null
-layerwise_stochastic_recon_coeff: 1.0
+stochastic_masked_recon_coeff: 1
+layerwise_masked_recon_coeff: null
+layerwise_stochastic_masked_recon_coeff: 1.0
 output_loss_type: "mse"
 
 # --- Training ---

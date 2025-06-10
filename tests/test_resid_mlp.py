@@ -29,7 +29,6 @@ def test_resid_mlp_decomposition_happy_path() -> None:
         wandb_run_name=None,
         wandb_run_name_prefix="",
         # General
-        unit_norm_matrices=False,
         seed=0,
         C=10,  # Smaller C for faster testing
         n_stochastic_masks=1,
@@ -39,11 +38,11 @@ def test_resid_mlp_decomposition_happy_path() -> None:
             "layers.*.mlp_out",
         ],
         # Loss Coefficients
-        param_match_coeff=1.0,
+        faithfulness_coeff=1.0,
         masked_recon_coeff=2.0,
-        stochastic_mask_recon_coeff=1.0,
-        layerwise_recon_coeff=None,
-        layerwise_stochastic_recon_coeff=None,
+        stochastic_masked_recon_coeff=1.0,
+        layerwise_masked_recon_coeff=None,
+        layerwise_stochastic_masked_recon_coeff=None,
         importance_loss_coeff=3e-3,
         schatten_coeff=None,
         embedding_recon_coeff=None,

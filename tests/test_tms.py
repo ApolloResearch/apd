@@ -30,18 +30,17 @@ def test_tms_decomposition_happy_path() -> None:
         wandb_run_name=None,
         wandb_run_name_prefix="",
         # General
-        unit_norm_matrices=False,
         seed=0,
         C=10,  # Smaller C for faster testing
         n_stochastic_masks=1,
         n_gate_hidden_neurons=8,
         target_module_patterns=["linear1", "linear2", "hidden_layers.0"],
         # Loss Coefficients
-        param_match_coeff=1.0,
+        faithfulness_coeff=1.0,
         masked_recon_coeff=None,
-        stochastic_mask_recon_coeff=1.0,
-        layerwise_recon_coeff=1e-1,
-        layerwise_stochastic_recon_coeff=1.0,
+        stochastic_masked_recon_coeff=1.0,
+        layerwise_masked_recon_coeff=1e-1,
+        layerwise_stochastic_masked_recon_coeff=1.0,
         importance_loss_coeff=3e-3,
         schatten_coeff=None,
         embedding_recon_coeff=None,

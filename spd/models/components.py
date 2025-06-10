@@ -7,9 +7,8 @@ from torch.nn import functional as F
 from spd.module_utils import init_param_
 
 
-def leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
-    return torch.where(x > 0, x, alpha * x)
-    # return F.leaky_relu(x, negative_slope=alpha)
+def lower_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+    return torch.where(x > 0, torch.clamp(x, max=1), alpha * x)
 
 
 def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
@@ -27,10 +26,10 @@ class Gate(nn.Module):
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
 
-    def forward(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
-        return leaky_relu(torch.clamp(x * self.weight + self.bias, max=1))
+    def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
+        return lower_leaky_relu(x * self.weight + self.bias)
 
-    def forward_unclamped(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
+    def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return upper_leaky_relu(x * self.weight + self.bias)
 
 
@@ -49,7 +48,7 @@ class GateMLP(nn.Module):
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
-    def _compute_pre_activation(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
+    def _compute_pre_activation(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         """Compute the output before applying the final activation function."""
         # First layer with gelu activation
         hidden = einops.einsum(
@@ -70,11 +69,11 @@ class GateMLP(nn.Module):
         return out
 
     @torch.compile
-    def forward(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
-        return leaky_relu(torch.clamp(self._compute_pre_activation(x), max=1))
+    def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
+        return lower_leaky_relu(self._compute_pre_activation(x))
 
     @torch.compile
-    def forward_unclamped(self, x: Float[Tensor, "batch C"]) -> Float[Tensor, "batch C"]:
+    def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return upper_leaky_relu(self._compute_pre_activation(x))
 
 
@@ -140,11 +139,10 @@ class EmbeddingComponent(nn.Module):
         self.A = nn.Parameter(torch.empty(vocab_size, C))
         self.B = nn.Parameter(torch.empty(C, embedding_dim))
 
-        # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
         init_param_(self.A, fan_val=embedding_dim, nonlinearity="linear")
         init_param_(self.B, fan_val=C, nonlinearity="linear")
 
-        # For sparse forward passes
+        # For masked forward passes
         self.mask: Float[Tensor, "batch pos C"] | None = None
 
     @property

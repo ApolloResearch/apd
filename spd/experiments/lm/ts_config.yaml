@@ -8,18 +8,17 @@ wandb_run_name_prefix: ""
 
 # --- General ---
 seed: 0
-unit_norm_matrices: false
 C: 100
 n_stochastic_masks: 1
 n_gate_hidden_neurons: null
 target_module_patterns: ["transformer.h.3.mlp.c_fc"]
 
 # --- Loss Coefficients ---
-param_match_coeff: 1.0
+faithfulness_coeff: 1.0
 masked_recon_coeff: null
-random_stochastic_recon_coeff: null
-layerwise_recon_coeff: null
-layerwise_stochastic_recon_coeff: 1
+stochastic_masked_recon_coeff: null
+layerwise_masked_recon_coeff: null
+layerwise_stochastic_masked_recon_coeff: 1
 importance_loss_coeff: 1e-6
 schatten_coeff: null
 # embedding_recon_coeff: 1
