@@ -397,7 +397,8 @@ def plot_ci_histograms(
     """
     fig_dict = {}
 
-    for layer_name, layer_ci in causal_importances.items():
+    for layer_name_raw, layer_ci in causal_importances.items():
+        layer_name = layer_name_raw.replace(".", "_")
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.hist(layer_ci.flatten().cpu().numpy(), bins=bins)
         ax.set_title(f"Causal importances for {layer_name}")
