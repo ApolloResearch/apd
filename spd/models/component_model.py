@@ -9,27 +9,14 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel
 from torch import Tensor, nn
 from wandb.apis.public import Run
 
 from spd.configs import Config
-from spd.models.components import (
-    EmbeddingComponent,
-    Gate,
-    GateMLP,
-    LinearComponent,
-)
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.spd_types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import load_pretrained
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
-
-
-class ComponentModelPaths(BaseModel):
-    """Paths to output files from a ComponentModel training run."""
-
-    model: Path
-    config: Path
 
 
 class ComponentModel(nn.Module):
@@ -214,8 +201,12 @@ class ComponentModel(nn.Module):
                 handle.remove()
 
     @staticmethod
-    def _download_wandb_files(wandb_project_run_id: str) -> ComponentModelPaths:
-        """Download the relevant files from a wandb run."""
+    def _download_wandb_files(wandb_project_run_id: str) -> tuple[Path, Path]:
+        """Download the relevant files from a wandb run.
+
+        Returns:
+            Tuple of (model_path, config_path)
+        """
         api = wandb.Api()
         run: Run = api.run(wandb_project_run_id)
 
@@ -226,7 +217,7 @@ class ComponentModel(nn.Module):
         final_config_path = download_wandb_file(run, run_dir, "final_config.yaml")
         checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
 
-        return ComponentModelPaths(model=checkpoint_path, config=final_config_path)
+        return checkpoint_path, final_config_path
 
     @classmethod
     def from_pretrained(cls, path: ModelPath) -> tuple["ComponentModel", Config, Path]:
@@ -242,16 +233,15 @@ class ComponentModel(nn.Module):
             wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             api = wandb.Api()
             run: Run = api.run(wandb_path)
-            paths = cls._download_wandb_files(wandb_path)
+            model_path, config_path = cls._download_wandb_files(wandb_path)
             out_dir = fetch_wandb_run_dir(run.id)
         else:
-            paths = ComponentModelPaths(
-                model=Path(path), config=Path(path).parent / "final_config.yaml"
-            )
+            model_path = Path(path)
+            config_path = Path(path).parent / "final_config.yaml"
             out_dir = Path(path).parent
 
-        model_weights = torch.load(paths.model, map_location="cpu", weights_only=True)
-        with open(paths.config) as f:
+        model_weights = torch.load(model_path, map_location="cpu", weights_only=True)
+        with open(config_path) as f:
             config = Config(**yaml.safe_load(f))
 
         assert (

@@ -68,11 +68,11 @@ class GateMLP(nn.Module):
         out = out + self.out_bias
         return out
 
-    @torch.compile
+    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
     def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return lower_leaky_relu(self._compute_pre_activation(x))
 
-    @torch.compile
+    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
     def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return upper_leaky_relu(self._compute_pre_activation(x))
 
@@ -101,7 +101,7 @@ class LinearComponent(nn.Module):
         """A @ B"""
         return einops.einsum(self.A, self.B, "d_in C, C d_out -> d_out d_in")
 
-    @torch.compile
+    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         """Forward pass through A and B matrices.
 
@@ -152,7 +152,7 @@ class EmbeddingComponent(nn.Module):
             self.A, self.B, "vocab_size C, ... C embedding_dim -> vocab_size embedding_dim"
         )
 
-    @torch.compile
+    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
     def forward(self, x: Float[Tensor, "batch pos"]) -> Float[Tensor, "batch pos embedding_dim"]:
         """Forward through the embedding component using nn.Embedding for efficient lookup
 
