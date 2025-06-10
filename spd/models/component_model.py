@@ -1,4 +1,5 @@
 import fnmatch
+from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -125,31 +126,44 @@ class ComponentModel(nn.Module):
             out = getattr(raw_out, self.pretrained_model_output_attr)
         return out
 
-    def forward_with_component(
+    @contextmanager
+    def _replaced_modules(
         self,
-        *args: Any,
-        module_name: str,
-        component: LinearComponent | EmbeddingComponent,
-        mask: Float[Tensor, "... C"] | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Forward pass with a single component replacement."""
-        # Note that module_name uses "." separators but self.components use "-" separators
-        old_module = self.model.get_submodule(module_name)
-        assert old_module is not None
+        components: dict[str, LinearComponent | EmbeddingComponent],
+        masks: dict[str, Float[Tensor, "... C"]] | None = None,
+    ):
+        """Context manager for temporarily replacing modules with components.
 
-        self.model.set_submodule(module_name, component)
-        if mask is not None:
-            component.mask = mask
+        Args:
+            components: Dictionary mapping component names to components
+            masks: Optional dictionary mapping component names to masks
+        """
+        old_modules = {}
 
-        out = self(*args, **kwargs)
+        # Setup: Save old modules and replace with components
+        for module_name, component in components.items():
+            old_module = self.model.get_submodule(module_name)
+            assert old_module is not None, f"Module {module_name} not found"
 
-        # Restore the original module
-        self.model.set_submodule(module_name, old_module)
+            old_modules[module_name] = old_module
 
-        component.mask = None
+            # Set mask if provided
+            if masks is not None:
+                component.mask = masks[module_name]
 
-        return out
+            # Replace module
+            self.model.set_submodule(module_name, component)
+
+        try:
+            yield
+        finally:
+            # Teardown: Restore original modules and clear masks
+            for module_name, old_module in old_modules.items():
+                self.model.set_submodule(module_name, old_module)
+
+            # Clear masks from all components
+            for component in components.values():
+                component.mask = None
 
     def forward_with_components(
         self,
@@ -158,60 +172,46 @@ class ComponentModel(nn.Module):
         masks: dict[str, Float[Tensor, "... C"]] | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Forward pass with temporary component replacement."""
-        # Note that components and masks uses "-" separators
-        old_modules = {}
-        for component_name, component in components.items():
-            module_name = component_name.replace("-", ".")
-            # component: LinearComponent = self.components[module_name.replace(".", "-")]
-            old_module = self.model.get_submodule(module_name)
-            assert old_module is not None
-            old_modules[module_name] = old_module
+        """Forward pass with temporary component replacements.
 
-            if masks is not None:
-                component.mask = masks[component_name]
-            self.model.set_submodule(module_name, component)
-
-        out = self(*args, **kwargs)
-
-        # Restore the original modules
-        for module_name, old_module in old_modules.items():
-            self.model.set_submodule(module_name, old_module)
-
-        # Remove the masks attribute from the components
-        for component in components.values():
-            component.mask = None
-
-        return out
+        Args:
+            components: Dictionary mapping component names (with "-" separators) to components
+            masks: Optional dictionary mapping component names to masks
+        """
+        with self._replaced_modules(components, masks):
+            return self(*args, **kwargs)
 
     def forward_with_pre_forward_cache_hooks(
         self, *args: Any, module_names: list[str], **kwargs: Any
     ) -> tuple[Any, dict[str, Tensor]]:
-        """Forward pass with caching at in the input to the modules given by `module_names`.
+        """Forward pass with caching at the input to the modules given by `module_names`.
 
         Args:
             module_names: List of module names to cache the inputs to.
+
+        Returns:
+            Tuple of (model output, cache dictionary)
         """
         cache = {}
-
-        def cache_hook(module: nn.Module, input: tuple[Tensor, ...], param_name: str) -> Tensor:
-            cache[param_name] = input[0]
-            return input[0]
-
         handles: list[torch.utils.hooks.RemovableHandle] = []
+
+        def cache_hook(module: nn.Module, input: tuple[Tensor, ...], param_name: str) -> None:
+            cache[param_name] = input[0]
+
+        # Register hooks
         for module_name in module_names:
             module = self.model.get_submodule(module_name)
-            assert module is not None
+            assert module is not None, f"Module {module_name} not found"
             handles.append(
                 module.register_forward_pre_hook(partial(cache_hook, param_name=module_name))
             )
 
-        out = self(*args, **kwargs)
-
-        for handle in handles:
-            handle.remove()
-
-        return out, cache
+        try:
+            out = self(*args, **kwargs)
+            return out, cache
+        finally:
+            for handle in handles:
+                handle.remove()
 
     @staticmethod
     def _download_wandb_files(wandb_project_run_id: str) -> ComponentModelPaths:
