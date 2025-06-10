@@ -60,7 +60,7 @@ def calc_embedding_recon_loss(
 
 
 def calc_schatten_loss(
-    sparsity_masks: dict[str, Float[Tensor, "... C"]],
+    ci_upper_leaky: dict[str, Float[Tensor, "... C"]],
     pnorm: float,
     components: dict[str, LinearComponent | EmbeddingComponent],
     device: str,
@@ -68,17 +68,17 @@ def calc_schatten_loss(
     """Calculate the Schatten loss on the active components.
 
     The Schatten loss is calculated as:
-        L = Σ_{components} mean(sparsity_mask^pnorm · (||A||_2^2 + ||B||_2^2))
+        L = Σ_{components} mean(ci_upper_leaky^pnorm · (||A||_2^2 + ||B||_2^2))
 
     where:
-        - sparsity_mask is the activation mask for each component
+        - ci_upper_leaky are the upper leaky relu causal importances for each component
         - pnorm is the power to raise the mask to
         - A and B are the component matrices
         - ||·||_2 is the L2 norm
 
     Args:
-        sparsity_masks: Dictionary of sparsity masks for each layer.
-        pnorm: The pnorm to use for the sparsity loss. Must be positive.
+        ci_upper_leaky: Dictionary of upper leaky relu causal importances for each layer.
+        pnorm: The pnorm to use for the importance loss. Must be positive.
         components: Dictionary of components for each layer.
         device: The device to compute the loss on.
 
@@ -92,34 +92,35 @@ def calc_schatten_loss(
         B_norms = component.B.square().sum(dim=-1)
         schatten_norms = A_norms + B_norms
         loss = einops.einsum(
-            sparsity_masks[component_name] ** pnorm, schatten_norms, "... C, C -> ..."
+            ci_upper_leaky[component_name] ** pnorm, schatten_norms, "... C, C -> ..."
         )
         total_loss += loss.mean()
     return total_loss
 
 
 def calc_importance_loss(
-    sparsity_masks: dict[str, Float[Tensor, "... C"]], pnorm: float
+    ci_upper_leaky: dict[str, Float[Tensor, "... C"]], pnorm: float
 ) -> Float[Tensor, ""]:
-    """Calculate the Lp sparsity loss on the attributions.
+    """Calculate the importance loss on the upper leaky relu causal importances.
 
     Args:
-        sparsity_masks: Dictionary of sparsity masks for each layer.
-        pnorm: The pnorm to use for the sparsity loss.
-    Returns:
-        The Lp sparsity loss.
-    """
-    total_loss = torch.zeros_like(next(iter(sparsity_masks.values())))
+        ci_upper_leaky: Dictionary of causal importances upper leaky relu for each layer.
+        pnorm: The pnorm to use for the importance loss. Must be positive.
 
-    for layer_sparsity_mask in sparsity_masks.values():
-        # Note, the paper uses an absolute value but our layer_sparsity_mask is already > 0
-        total_loss = total_loss + layer_sparsity_mask**pnorm
+    Returns:
+        The importance loss on the upper leaky relu causal importances.
+    """
+    total_loss = torch.zeros_like(next(iter(ci_upper_leaky.values())))
+
+    for layer_ci_upper_leaky in ci_upper_leaky.values():
+        # Note, the paper uses an absolute value but our layer_ci_upper_leaky is already > 0
+        total_loss = total_loss + layer_ci_upper_leaky**pnorm
 
     # Sum over the C dimension and mean over the other dimensions
     return total_loss.sum(dim=-1).mean()
 
 
-def calc_layerwise_ci_masked_recon_loss(
+def calc_layerwise_masked_recon_loss(
     model: ComponentModel,
     batch: Int[Tensor, "..."],
     device: str,
@@ -148,7 +149,7 @@ def calc_layerwise_ci_masked_recon_loss(
     return total_loss / (n_modified_components * len(masks))
 
 
-def calc_ci_masked_recon_loss(
+def calc_masked_recon_loss(
     model: ComponentModel,
     batch: Float[Tensor, "... d_in"],
     components: dict[str, LinearComponent | EmbeddingComponent],

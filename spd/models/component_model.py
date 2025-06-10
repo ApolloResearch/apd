@@ -161,7 +161,7 @@ class ComponentModel(nn.Module):
         """Forward pass with temporary component replacements.
 
         Args:
-            components: Dictionary mapping component names (with "-" separators) to components
+            components: Dictionary mapping component names to components
             masks: Optional dictionary mapping component names to masks
         """
         with self._replaced_modules(components, masks):

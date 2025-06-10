@@ -23,8 +23,8 @@ from spd.configs import Config, LMTaskConfig
 from spd.data import DatasetConfig
 from spd.log import logger
 from spd.models.component_model import ComponentModel
+from spd.models.component_utils import calc_causal_importances
 from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
-from spd.run_spd import calc_component_acts, calc_masks
 from spd.spd_types import ModelPath
 
 DEFAULT_MODEL_PATH: ModelPath = "wandb:spd-lm/runs/151bsctx"
@@ -220,11 +220,11 @@ def load_next_prompt() -> None:
         _, pre_weight_acts = app_data.model.forward_with_pre_forward_cache_hooks(
             input_ids, module_names=list(app_data.components.keys())
         )
-        As = {module_name: v.linear_component.A for module_name, v in app_data.components.items()}
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore[reportArgumentType]
-        masks, _ = calc_masks(
+        As = {module_name: v.A for module_name, v in app_data.components.items()}
+        masks, _ = calc_causal_importances(
+            pre_weight_acts=pre_weight_acts,
+            As=As,
             gates=app_data.gates,
-            target_component_acts=target_component_acts,
             detach_inputs=True,  # No gradients needed
         )
     st.session_state.current_masks = masks  # Dict[str, Float[Tensor, "1 seq_len C"]]

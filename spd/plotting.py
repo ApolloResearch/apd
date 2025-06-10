@@ -11,17 +11,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
 from spd.models.component_model import ComponentModel
-from spd.models.component_utils import calc_component_acts, calc_masks
-from spd.models.components import (
-    EmbeddingComponent,
-    Gate,
-    GateMLP,
-    LinearComponent,
-)
+from spd.models.component_utils import calc_causal_importances
+from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 
 
 def permute_to_identity(
-    mask: Float[Tensor, "batch C"],
+    ci_vals: Float[Tensor, "batch C"],
 ) -> tuple[Float[Tensor, "batch C"], Float[Tensor, " C"]]:
     """Permute matrix to make it as close to identity as possible.
 
@@ -30,32 +25,32 @@ def permute_to_identity(
         - Permutation indices
     """
 
-    if mask.ndim != 2:
-        raise ValueError(f"Mask must have 2 dimensions, got {mask.ndim}")
+    if ci_vals.ndim != 2:
+        raise ValueError(f"Mask must have 2 dimensions, got {ci_vals.ndim}")
 
-    batch, C = mask.shape
-    new_mask = mask.clone()
+    batch, C = ci_vals.shape
+    new_mask = ci_vals.clone()
     effective_rows = min(batch, C)
-    perm_indices = torch.zeros(C, dtype=torch.long, device=mask.device)
+    perm_indices = torch.zeros(C, dtype=torch.long, device=ci_vals.device)
 
     perm: list[int] = [0] * C
     used: set[int] = set()
     for i in range(effective_rows):
-        sorted_indices: list[int] = torch.argsort(mask[i, :], descending=True).tolist()
+        sorted_indices: list[int] = torch.argsort(ci_vals[i, :], descending=True).tolist()
         chosen: int = next((col for col in sorted_indices if col not in used), sorted_indices[0])
         perm[i] = chosen
         used.add(chosen)
     remaining: list[int] = sorted(list(set(range(C)) - used))
     for idx, col in enumerate(remaining):
         perm[effective_rows + idx] = col
-    new_mask = mask[:, perm]
-    perm_indices = torch.tensor(perm, device=mask.device)
+    new_ci_vals = ci_vals[:, perm]
+    perm_indices = torch.tensor(perm, device=ci_vals.device)
 
-    return new_mask, perm_indices
+    return new_ci_vals, perm_indices
 
 
-def _plot_mask_figure(
-    masks: dict[str, Float[Tensor, "batch C"]],
+def _plot_causal_importances_figure(
+    ci_vals: dict[str, Float[Tensor, "... C"]],
     title_suffix: str,
     colormap: str,
     input_magnitude: float,
@@ -64,8 +59,9 @@ def _plot_mask_figure(
     """Helper function to plot a single mask figure.
 
     Args:
-        masks: Dictionary of masks to plot
-        title_suffix: String to append to titles (e.g., "masks" or "sparsity masks")
+        ci_vals: Dictionary of causal importances (or causal importances upper leaky relu) to plot
+        title_suffix: String to append to titles (e.g., "causal importances" or
+            "causal importances upper leaky relu")
         colormap: Matplotlib colormap name
         input_magnitude: Input magnitude value for the title
         has_pos_dim: Whether the masks have a position dimension
@@ -74,9 +70,9 @@ def _plot_mask_figure(
         The matplotlib figure
     """
     fig, axs = plt.subplots(
-        len(masks),
+        len(ci_vals),
         1,
-        figsize=(5, 5 * len(masks)),
+        figsize=(5, 5 * len(ci_vals)),
         constrained_layout=True,
         squeeze=False,
         dpi=300,
@@ -84,7 +80,7 @@ def _plot_mask_figure(
     axs = np.array(axs)
 
     images = []
-    for j, (mask_name, mask) in enumerate(masks.items()):
+    for j, (mask_name, mask) in enumerate(ci_vals.items()):
         # mask has shape (batch, C) or (batch, pos, C)
         mask_data = mask.detach().cpu().numpy()
         if has_pos_dim:
@@ -102,8 +98,8 @@ def _plot_mask_figure(
 
     # Add unified colorbar
     norm = plt.Normalize(
-        vmin=min(mask.min().item() for mask in masks.values()),
-        vmax=max(mask.max().item() for mask in masks.values()),
+        vmin=min(mask.min().item() for mask in ci_vals.values()),
+        vmax=max(mask.max().item() for mask in ci_vals.values()),
     )
     for im in images:
         im.set_norm(norm)
@@ -115,16 +111,16 @@ def _plot_mask_figure(
     return fig
 
 
-def plot_mask_vals(
+def plot_causal_importance_vals(
     model: ComponentModel,
     components: dict[str, LinearComponent | EmbeddingComponent],
     gates: dict[str, Gate | GateMLP],
     batch_shape: tuple[int, ...],
     device: str | torch.device,
     input_magnitude: float,
-    plot_regular_masks: bool = True,
+    plot_raw_cis: bool = True,
 ) -> tuple[dict[str, plt.Figure], dict[str, Float[Tensor, " C"]]]:
-    """Plot the values of the mask for a batch of inputs with single active features.
+    """Plot the values of the causal importances for a batch of inputs with single active features.
 
     Args:
         model: The ComponentModel
@@ -133,12 +129,12 @@ def plot_mask_vals(
         batch_shape: Shape of the batch
         device: Device to use
         input_magnitude: Magnitude of input features
-        plot_regular_masks: Whether to plot the regular masks (blue plots)
+        plot_raw_cis: Whether to plot the raw causal importances (blue plots)
 
     Returns:
         Tuple of:
-            - Dictionary of figures with keys 'masks' (if plot_regular_masks=True) and 'sparsity_masks'
-            - Dictionary of permutation indices for sparsity masks
+            - Dictionary of figures with keys 'causal_importances' (if plot_raw_cis=True) and 'causal_importances_upper_leaky'
+            - Dictionary of permutation indices for causal importances
     """
     # First, create a batch of inputs with single active features
     has_pos_dim = len(batch_shape) == 3
@@ -148,58 +144,46 @@ def plot_mask_vals(
         # NOTE: For now, we only plot the mask of the first pos dim
         batch = batch.unsqueeze(1)
 
-    # Get mask values
     pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
         batch, module_names=list(components.keys())
     )[1]
     As = {module_name: v.A for module_name, v in components.items()}
 
-    target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
-
-    masks_raw, sparsity_masks_raw = calc_masks(
-        gates=gates,
-        target_component_acts=target_component_acts,
-        detach_inputs=False,
+    ci_raw, ci_upper_leaky_raw = calc_causal_importances(
+        pre_weight_acts=pre_weight_acts, As=As, gates=gates, detach_inputs=False
     )
 
-    # Permute both mask types with their own optimal permutations
-    masks = {}
-    sparsity_masks = {}
-    all_perm_indices_sparsity_masks = {}
+    ci = {}
+    ci_upper_leaky = {}
+    all_perm_indices = {}
 
-    for k in masks_raw:
-        # Compute optimal permutation for regular masks
-        masks[k], _ = permute_to_identity(mask=masks_raw[k])
-        # Compute optimal permutation for sparsity masks
-        sparsity_masks[k], all_perm_indices_sparsity_masks[k] = permute_to_identity(
-            mask=sparsity_masks_raw[k]
-        )
+    for k in ci_raw:
+        ci[k], _ = permute_to_identity(ci_vals=ci_raw[k])
+        ci_upper_leaky[k], all_perm_indices[k] = permute_to_identity(ci_vals=ci_upper_leaky_raw[k])
 
     # Create figures dictionary
     figures = {}
 
-    # Create masks figure only if requested
-    if plot_regular_masks:
-        masks_fig = _plot_mask_figure(
-            masks=masks,
-            title_suffix="masks",
+    if plot_raw_cis:
+        ci_fig = _plot_causal_importances_figure(
+            ci_vals=ci,
+            title_suffix="importance value lower leaky relu",
             colormap="Blues",
             input_magnitude=input_magnitude,
             has_pos_dim=has_pos_dim,
         )
-        figures["masks"] = masks_fig
+        figures["causal_importances"] = ci_fig
 
-    # Always create sparsity masks figure
-    sparsity_masks_fig = _plot_mask_figure(
-        masks=sparsity_masks,
-        title_suffix="sparsity masks",
+    ci_upper_leaky_fig = _plot_causal_importances_figure(
+        ci_vals=ci_upper_leaky,
+        title_suffix="importance value upper leaky relu",
         colormap="Reds",
         input_magnitude=input_magnitude,
         has_pos_dim=has_pos_dim,
     )
-    figures["sparsity_masks"] = sparsity_masks_fig
+    figures["causal_importances_upper_leaky"] = ci_upper_leaky_fig
 
-    return figures, all_perm_indices_sparsity_masks
+    return figures, all_perm_indices
 
 
 def plot_subnetwork_attributions_statistics(
@@ -331,18 +315,18 @@ def plot_AB_matrices(
     return fig
 
 
-def create_embed_mask_sample_table(
-    masks: dict[str, Float[Tensor, "... C"]],
+def create_embed_ci_sample_table(
+    causal_importances: dict[str, Float[Tensor, "... C"]],
 ) -> wandb.Table | None:
     """Create a wandb table visualizing embedding mask values.
 
     Args:
-        masks: Dictionary of masks for each component.
+        causal_importances: Dictionary of causal importances for each component.
 
     Returns:
-        A wandb Table object or None if transformer.wte not in masks.
+        A wandb Table object or None if transformer.wte not in causal_importances.
     """
-    if "transformer.wte" not in masks:
+    if "transformer.wte" not in causal_importances:
         return None
 
     # Create a 20x10 table for wandb
@@ -350,8 +334,8 @@ def create_embed_mask_sample_table(
     # Add "Row Name" as the first column
     component_names = ["TokenSample"] + ["CompVal" for _ in range(10)]
 
-    for i, ma in enumerate(masks["transformer.wte"][0, :20]):
-        active_values = ma[ma > 0.1].tolist()
+    for i, ci in enumerate(causal_importances["transformer.wte"][0, :20]):
+        active_values = ci[ci > 0.1].tolist()
         # Cap at 10 components
         active_values = active_values[:10]
         formatted_values = [f"{val:.2f}" for val in active_values]
@@ -398,14 +382,14 @@ def plot_mean_component_activation_counts(
     return fig
 
 
-def plot_mask_histograms(
-    masks: dict[str, Float[Tensor, "... C"]],
+def plot_ci_histograms(
+    causal_importances: dict[str, Float[Tensor, "... C"]],
     bins: int = 100,
 ) -> dict[str, plt.Figure]:
     """Plot histograms of mask values for each layer.
 
     Args:
-        masks: Dictionary of masks for each component.
+        causal_importances: Dictionary of causal importances for each component.
         bins: Number of bins for the histogram.
 
     Returns:
@@ -413,11 +397,11 @@ def plot_mask_histograms(
     """
     fig_dict = {}
 
-    for layer_name, layer_mask in masks.items():
+    for layer_name, layer_ci in causal_importances.items():
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.hist(layer_mask.flatten().cpu().numpy(), bins=bins)
-        ax.set_title(f"Mask values for {layer_name}")
-        ax.set_xlabel("Mask value")
+        ax.hist(layer_ci.flatten().cpu().numpy(), bins=bins)
+        ax.set_title(f"Causal importances for {layer_name}")
+        ax.set_xlabel("Causal importance value")
         # Use a log scale
         ax.set_yscale("log")
         ax.set_ylabel("Frequency")
@@ -453,7 +437,7 @@ def create_toy_model_plot_results(
     """
     fig_dict = {}
 
-    figures, all_perm_indices_sparsity_masks = plot_mask_vals(
+    figures, all_perm_indices = plot_causal_importance_vals(
         model=model,
         components=components,
         gates=gates,
@@ -465,8 +449,7 @@ def create_toy_model_plot_results(
     # Merge the figures dict into fig_dict
     fig_dict.update(figures)
 
-    # Use sparsity masks permutation for AB matrices (this was the original behavior)
     fig_dict["AB_matrices"] = plot_AB_matrices(
-        components=components, all_perm_indices=all_perm_indices_sparsity_masks
+        components=components, all_perm_indices=all_perm_indices
     )
     return fig_dict

@@ -7,15 +7,6 @@ from torch.nn import functional as F
 from spd.module_utils import init_param_
 
 
-def lower_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
-    return torch.where(x > 0, torch.clamp(x, max=1), alpha * x)
-
-
-def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
-    # TODO: Make more memory efficient
-    return torch.where(x > 1, 1 + alpha * (x - 1), F.relu(x))
-
-
 class Gate(nn.Module):
     """A gate that maps a single input to a single output."""
 
@@ -26,13 +17,8 @@ class Gate(nn.Module):
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
 
-    @torch.compile
     def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
-        return lower_leaky_relu(x * self.weight + self.bias)
-
-    @torch.compile
-    def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
-        return upper_leaky_relu(x * self.weight + self.bias)
+        return x * self.weight + self.bias
 
 
 class GateMLP(nn.Module):
@@ -50,33 +36,26 @@ class GateMLP(nn.Module):
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_ci_mlp_neurons, nonlinearity="linear")
 
-    def _compute_pre_activation(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
-        """Compute the output before applying the final activation function."""
-        # First layer with gelu activation
-        hidden = einops.einsum(
-            x,
-            self.mlp_in,
-            "... C, C n_ci_mlp_neurons -> ... C n_ci_mlp_neurons",
+    def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
+        hidden = (
+            einops.einsum(
+                x,
+                self.mlp_in,
+                "... C, C n_ci_mlp_neurons -> ... C n_ci_mlp_neurons",
+            )
+            + self.in_bias
         )
-        hidden = hidden + self.in_bias
         hidden = F.gelu(hidden)
 
-        # Second layer
-        out = einops.einsum(
-            hidden,
-            self.mlp_out,
-            "... C n_ci_mlp_neurons, C n_ci_mlp_neurons -> ... C",
+        out = (
+            einops.einsum(
+                hidden,
+                self.mlp_out,
+                "... C n_ci_mlp_neurons, C n_ci_mlp_neurons -> ... C",
+            )
+            + self.out_bias
         )
-        out = out + self.out_bias
         return out
-
-    @torch.compile
-    def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
-        return lower_leaky_relu(self._compute_pre_activation(x))
-
-    @torch.compile
-    def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
-        return upper_leaky_relu(self._compute_pre_activation(x))
 
 
 class LinearComponent(nn.Module):

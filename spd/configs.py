@@ -164,7 +164,7 @@ class Config(BaseModel):
     )
     pnorm: PositiveFloat = Field(
         ...,
-        description="The p-value used for the L_p sparsity loss",
+        description="The p-value used for the importance loss",
     )
     output_loss_type: Literal["mse", "kl"] = Field(
         ...,

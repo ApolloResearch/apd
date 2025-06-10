@@ -7,19 +7,19 @@ from spd.experiments.resid_mlp.models import ResidualMLP
 from spd.experiments.tms.models import TMSModel
 from spd.models.component_model import ComponentModel
 from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
-from spd.plotting import plot_mask_vals
+from spd.plotting import plot_causal_importance_vals
 from spd.settings import REPO_ROOT
 
 
-def extract_sparsity_masks(run_id: str, input_magnitude: float = 0.75) -> dict[str, Any]:
-    """Extract sparsity masks from a single run.
+def extract_ci_val_figures(run_id: str, input_magnitude: float = 0.75) -> dict[str, Any]:
+    """Extract causal importances from a single run.
 
     Args:
         run_id: Wandb run ID to load model from
-        input_magnitude: Magnitude of input features for mask plotting
+        input_magnitude: Magnitude of input features for causal importances plotting
 
     Returns:
-        Dictionary containing mask data and metadata
+        Dictionary containing causal importances data and metadata
     """
     model, config, _ = ComponentModel.from_pretrained(run_id)
     target_model = model.model
@@ -44,57 +44,57 @@ def extract_sparsity_masks(run_id: str, input_magnitude: float = 0.75) -> dict[s
     device = next(model.parameters()).device
 
     # Get mask values without plotting regular masks
-    figures, all_perm_indices_sparsity_masks = plot_mask_vals(
+    figures, all_perm_indices_ci_vals = plot_causal_importance_vals(
         model=model,
         components=components,
         gates=gates,
         batch_shape=batch_shape,
         device=device,
         input_magnitude=input_magnitude,
-        plot_regular_masks=False,
+        plot_raw_cis=False,
     )
 
     return {
         "figures": figures,
-        "all_perm_indices_sparsity_masks": all_perm_indices_sparsity_masks,
+        "all_perm_indices_ci_vals": all_perm_indices_ci_vals,
         "config": config,
         "components": components,
         "n_features": n_features,
     }
 
 
-def plot_increasing_sparsity_masks(
+def plot_increasing_importance_coeff_ci_vals(
     run_ids: list[str], input_magnitude: float = 0.75, best_idx: list[int] | None = None
 ) -> plt.Figure:
-    """Plot sparsity masks for multiple runs in a combined figure.
+    """Plot increasing importance coeff for multiple runs in a combined figure.
 
     Args:
         run_ids: List of wandb run IDs to load models from
-        input_magnitude: Magnitude of input features for mask plotting
+        input_magnitude: Magnitude of input features for causal importances plotting
         best_idx: List of indices indicating which runs are the best (for highlighting)
 
     Returns:
-        Combined figure with sparsity masks from all runs
+        Combined figure with causal importances from all runs
     """
     all_mask_data = {}
     all_components = []
 
-    # Collect sparsity masks from all runs
+    # Collect causal importances from all runs
     for run_id in run_ids:
         print(f"Loading model from {run_id}")
 
-        # Extract sparsity masks using helper function
-        extraction_result = extract_sparsity_masks(run_id, input_magnitude)
+        # Extract causal importances using helper function
+        extraction_result = extract_ci_val_figures(run_id, input_magnitude)
         figures = extraction_result["figures"]
         config = extraction_result["config"]
         assert isinstance(config, Config)
 
-        # Extract sparsity mask data from the figure
-        sparsity_fig = figures["sparsity_masks"]
+        # Extract causal importances data from the figure
+        ci_vals_fig = figures["causal_importances"]
 
         # Get mask data from the figure axes
         mask_data = {}
-        for i, ax in enumerate(sparsity_fig.axes[:-1]):  # Skip colorbar axis
+        for i, ax in enumerate(ci_vals_fig.axes[:-1]):  # Skip colorbar axis
             # Get the image data from the axis
             images = ax.get_images()
             if images:
@@ -112,7 +112,7 @@ def plot_increasing_sparsity_masks(
             "mask_data": mask_data,
             "importance_loss_coeff": config.importance_loss_coeff,
         }
-        plt.close(sparsity_fig)  # Close the individual figure
+        plt.close(ci_vals_fig)  # Close the individual figure
 
     # Create combined figure
     n_runs = len(run_ids)
@@ -208,9 +208,6 @@ def plot_increasing_sparsity_masks(
         cbar.set_label("Importance value", fontsize=16)
         cbar.ax.tick_params(labelsize=12)
 
-    # Set the main figure title
-    # fig.suptitle(f"Input magnitude={input_magnitude}", fontsize=16, y=1.02)
-
     return fig
 
 
@@ -225,13 +222,13 @@ if __name__ == "__main__":
     best_idx = [2]
 
     # Create and save the combined figure
-    fig = plot_increasing_sparsity_masks(run_ids, best_idx=best_idx)
+    fig = plot_increasing_importance_coeff_ci_vals(run_ids, best_idx=best_idx)
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out/"
     out_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(
-        out_dir / "resid_mlp_varying_sparsity_importance_vals.png",
+        out_dir / "resid_mlp_varying_importance_coeff_ci_vals.png",
         bbox_inches="tight",
         dpi=400,
     )
-    print(f"Saved figure to {out_dir / 'resid_mlp_varying_sparsity_importance_vals.png'}")
+    print(f"Saved figure to {out_dir / 'resid_mlp_varying_importance_coeff_ci_vals.png'}")
     plt.show()

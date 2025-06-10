@@ -1,5 +1,8 @@
+from collections.abc import Mapping
+
 import einops
 import torch
+import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -9,42 +12,14 @@ from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearCompo
 from spd.utils import extract_batch_data
 
 
-def calc_masks(
-    gates: dict[str, Gate | GateMLP],
-    target_component_acts: dict[str, Float[Tensor, "batch C"]],
-    detach_inputs: bool = False,
-) -> tuple[
-    dict[str, Float[Tensor, "batch C"]],
-    dict[str, Float[Tensor, "batch C"]],
-]:
-    """Calculate the mask for the SPD model.
-
-    Args:
-        gates: The gates to use for the mask.
-        component_acts: The activations after each subnetwork in the SPD model.
-        detach_inputs: Whether to detach the inputs to the gates.
-    Returns:
-        Tuple of (masks, sparsity_masks) dictionaries for each layer.
-    """
-    masks = {}
-    sparsity_masks = {}
-    for layer_name in gates:
-        gate_input = target_component_acts[layer_name]
-        if detach_inputs:
-            gate_input = gate_input.detach()
-        masks[layer_name] = gates[layer_name].forward(gate_input)
-        sparsity_masks[layer_name] = gates[layer_name].forward_unclamped(gate_input)
-    return masks, sparsity_masks
-
-
-def calc_random_masks(
-    masks: dict[str, Float[Tensor, "batch C"]],
+def calc_stochastic_masks(
+    causal_importances: dict[str, Float[Tensor, "... C"]],
     n_mask_samples: int,
-) -> list[dict[str, Float[Tensor, "batch C"]]]:
-    """Calculate n_mask_samples masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
+) -> list[dict[str, Float[Tensor, "... C"]]]:
+    """Calculate n_mask_samples stochastic masks with the formula `ci + (1 - ci) * rand_unif(0,1)`.
 
     Args:
-        masks: The masks to use for the stochastic masks.
+        causal_importances: The causal importances to use for the stochastic masks.
         n_mask_samples: The number of stochastic masks to calculate.
 
     Return:
@@ -53,48 +28,21 @@ def calc_random_masks(
     stochastic_masks = []
     for _ in range(n_mask_samples):
         stochastic_masks.append(
-            {
-                layer_name: mask + (1 - mask) * torch.rand_like(mask)
-                for layer_name, mask in masks.items()
-            }
+            {layer: ci + (1 - ci) * torch.rand_like(ci) for layer, ci in causal_importances.items()}
         )
     return stochastic_masks
 
 
-def calc_component_acts(
-    pre_weight_acts: dict[str, Float[Tensor, "batch d_in"] | Int[Tensor, "batch pos"]],
-    As: dict[str, Float[Tensor, "d_in C"]],
-) -> dict[str, Float[Tensor, "batch C"]]:
-    """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
-
-    Args:
-        pre_weight_acts: The activations before each layer in the target model.
-        As: The A matrix at each layer.
-    """
-    component_acts = {}
-    for param_name in pre_weight_acts:
-        acts = pre_weight_acts[param_name]
-        if not acts.dtype.is_floating_point:
-            # Embedding layer
-            component_acts[param_name] = As[param_name][acts]
-        else:
-            # Linear layer
-            component_acts[param_name] = einops.einsum(
-                acts, As[param_name], "... d_in, d_in C -> ... C"
-            )
-    return component_acts
-
-
-def calc_mask_l_zero(
-    masks: dict[str, Float[Tensor, "... C"]],
+def calc_ci_l_zero(
+    causal_importances: dict[str, Float[Tensor, "... C"]],
     cutoff: float = 1e-2,
 ) -> dict[str, float]:
-    """Calculate the L0 loss on the masks, summed over the C dimension."""
-    mask_l_zero = {}
-    for layer_name, mask in masks.items():
-        mean_dims = tuple(range(mask.ndim - 1))
-        mask_l_zero[layer_name] = (mask > cutoff).float().mean(dim=mean_dims).sum().item()
-    return mask_l_zero
+    """Calculate the L0 loss on the causal importances, summed over the C dimension."""
+    ci_l_zero = {}
+    for layer_name, ci in causal_importances.items():
+        mean_dims = tuple(range(ci.ndim - 1))
+        ci_l_zero[layer_name] = (ci > cutoff).float().mean(dim=mean_dims).sum().item()
+    return ci_l_zero
 
 
 def component_activation_statistics(
@@ -130,22 +78,21 @@ def component_activation_statistics(
         )
         As = {module_name: v.A for module_name, v in components.items()}
 
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
-
-        masks, sparsity_masks = calc_masks(
+        causal_importances, _ = calc_causal_importances(
+            pre_weight_acts=pre_weight_acts,
+            As=As,
             gates=gates,
-            target_component_acts=target_component_acts,
             detach_inputs=False,
         )
-        for module_name, mask in masks.items():
+        for module_name, ci in causal_importances.items():
             # mask (batch, pos, C) or (batch, C)
-            n_tokens[module_name] += mask.shape[:-1].numel()
+            n_tokens[module_name] += ci.shape[:-1].numel()
 
             # Count the number of components that are active at all
-            active_components = mask > 0
+            active_components = ci > 0
             total_n_active_components[module_name] += int(active_components.sum().item())
 
-            sum_dims = tuple(range(mask.ndim - 1))
+            sum_dims = tuple(range(ci.ndim - 1))
             component_activation_counts[module_name] += active_components.sum(dim=sum_dims)
 
     # Show the mean number of components
@@ -159,3 +106,50 @@ def component_activation_statistics(
     }
 
     return mean_n_active_components_per_token, mean_component_activation_counts
+
+
+def lower_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+    return torch.where(x > 0, torch.clamp(x, max=1), alpha * x)
+
+
+def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+    # TODO: Make more memory efficient
+    return torch.where(x > 1, 1 + alpha * (x - 1), F.relu(x))
+
+
+def calc_causal_importances(
+    pre_weight_acts: dict[str, Float[Tensor, "... d_in"] | Int[Tensor, "... pos"]],
+    As: Mapping[str, Float[Tensor, "d_in C"]],
+    gates: dict[str, Gate | GateMLP],
+    detach_inputs: bool = False,
+) -> tuple[dict[str, Float[Tensor, "... C"]], dict[str, Float[Tensor, "... C"]]]:
+    """Calculate component activations and causal importances in one pass to save memory.
+
+    Args:
+        pre_weight_acts: The activations before each layer in the target model.
+        As: The A matrix at each layer.
+        gates: The gates to use for the mask.
+        detach_inputs: Whether to detach the inputs to the gates.
+
+    Returns:
+        Tuple of (causal_importances, causal_importances_upper_leaky) dictionaries for each layer.
+    """
+    causal_importances = {}
+    causal_importances_upper_leaky = {}
+
+    for param_name in pre_weight_acts:
+        acts = pre_weight_acts[param_name]
+
+        if not acts.dtype.is_floating_point:
+            # Embedding layer
+            component_act = As[param_name][acts]
+        else:
+            # Linear layer
+            component_act = einops.einsum(acts, As[param_name], "... d_in, d_in C -> ... C")
+
+        gate_input = component_act.detach() if detach_inputs else component_act
+        gate_output = gates[param_name](gate_input)
+        causal_importances[param_name] = lower_leaky_relu(gate_output)
+        causal_importances_upper_leaky[param_name] = upper_leaky_relu(gate_output)
+
+    return causal_importances, causal_importances_upper_leaky

@@ -17,25 +17,24 @@ from spd.configs import Config
 from spd.log import logger
 from spd.losses import (
     calc_ce_losses,
-    calc_ci_masked_recon_loss,
     calc_embedding_recon_loss,
     calc_faithfulness_loss,
     calc_importance_loss,
-    calc_layerwise_ci_masked_recon_loss,
+    calc_layerwise_masked_recon_loss,
+    calc_masked_recon_loss,
     calc_schatten_loss,
 )
 from spd.models.component_model import ComponentModel, init_As_and_Bs_
 from spd.models.component_utils import (
-    calc_component_acts,
-    calc_mask_l_zero,
-    calc_masks,
-    calc_random_masks,
+    calc_causal_importances,
+    calc_ci_l_zero,
+    calc_stochastic_masks,
     component_activation_statistics,
 )
 from spd.models.components import EmbeddingComponent, Gate, GateMLP, LinearComponent
 from spd.plotting import (
-    create_embed_mask_sample_table,
-    plot_mask_histograms,
+    create_embed_ci_sample_table,
+    plot_ci_histograms,
     plot_mean_component_activation_counts,
 )
 from spd.utils import (
@@ -49,13 +48,17 @@ from spd.utils import (
 def get_common_run_name_suffix(config: Config) -> str:
     """Generate a run suffix based on Config that is common to all experiments."""
     run_suffix = ""
-    if config.ci_masked_recon_coeff is not None:
-        run_suffix += f"maskrecon{config.ci_masked_recon_coeff:.2e}_"
-        run_suffix += f"nrandmasks{config.n_mask_samples}_"
+    run_suffix += f"nrandmasks{config.n_mask_samples}_"
     if config.stochastic_ci_masked_recon_coeff is not None:
         run_suffix += f"randrecon{config.stochastic_ci_masked_recon_coeff:.2e}_"
+    if config.layerwise_stochastic_ci_masked_recon_coeff is not None:
+        run_suffix += f"layerwiserandrecon{config.layerwise_stochastic_ci_masked_recon_coeff:.2e}_"
+    if config.schatten_coeff is not None:
+        run_suffix += f"schatten{config.schatten_coeff:.2e}_"
+    if config.embedding_recon_coeff is not None:
+        run_suffix += f"embedrecon{config.embedding_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
-    run_suffix += f"lpsp{config.importance_loss_coeff:.2e}_"
+    run_suffix += f"import{config.importance_loss_coeff:.2e}_"
     run_suffix += f"C{config.C}_"
     run_suffix += f"sd{config.seed}_"
     run_suffix += f"lr{config.lr:.2e}_"
@@ -165,15 +168,11 @@ def optimize(
         )
         As = {module_name: components[module_name].A for module_name in components}
 
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
-
-        masks, sparsity_masks = calc_masks(
-            gates=gates, target_component_acts=target_component_acts, detach_inputs=False
+        causal_importances, causal_importances_upper_leaky = calc_causal_importances(
+            pre_weight_acts=pre_weight_acts, As=As, gates=gates, detach_inputs=False
         )
-        for layer_name, mask in masks.items():
-            alive_components[layer_name] = alive_components[layer_name] | (mask > 0.1).any(
-                dim=(0, 1)
-            )
+        for layer_name, ci in causal_importances.items():
+            alive_components[layer_name] = alive_components[layer_name] | (ci > 0.1).any(dim=(0, 1))
 
         # --- Calculate Losses --- #
         total_loss = torch.tensor(0.0, device=device)
@@ -184,15 +183,15 @@ def optimize(
             components=components, target_model=model.model, n_params=n_params, device=device
         )
         total_loss += config.faithfulness_coeff * faithfulness_loss
-        loss_terms["loss/parameter_matching"] = faithfulness_loss.item()
+        loss_terms["loss/faithfulness"] = faithfulness_loss.item()
 
         ####### masked recon loss #######
         if config.ci_masked_recon_coeff is not None:
-            ci_masked_recon_loss = calc_ci_masked_recon_loss(
+            ci_masked_recon_loss = calc_masked_recon_loss(
                 model=model,
                 batch=batch,
                 components=components,
-                masks=masks,
+                masks=causal_importances,
                 target_out=target_out,
                 loss_type=config.output_loss_type,
             )
@@ -201,29 +200,31 @@ def optimize(
 
         ####### stochastic masked recon loss #######
         if config.stochastic_ci_masked_recon_coeff is not None:
-            random_masks = calc_random_masks(masks=masks, n_mask_samples=config.n_mask_samples)
+            stochastic_masks = calc_stochastic_masks(
+                causal_importances=causal_importances, n_mask_samples=config.n_mask_samples
+            )
             random_mask_loss = torch.tensor(0.0, device=target_out.device)
-            for i in range(len(random_masks)):
-                random_mask_loss += calc_ci_masked_recon_loss(
+            for i in range(len(stochastic_masks)):
+                random_mask_loss += calc_masked_recon_loss(
                     model=model,
                     batch=batch,
                     components=components,
-                    masks=random_masks[i],
+                    masks=stochastic_masks[i],
                     target_out=target_out,
                     loss_type=config.output_loss_type,
                 )
-            random_mask_loss = random_mask_loss / len(random_masks)
+            random_mask_loss = random_mask_loss / len(stochastic_masks)
             total_loss += config.stochastic_ci_masked_recon_coeff * random_mask_loss
             loss_terms["loss/stochastic_ci_masked_reconstruction"] = random_mask_loss.item()
 
         ####### layerwise masked recon loss #######
         if config.layerwise_ci_masked_recon_coeff is not None:
-            layerwise_ci_masked_recon_loss = calc_layerwise_ci_masked_recon_loss(
+            layerwise_ci_masked_recon_loss = calc_layerwise_masked_recon_loss(
                 model=model,
                 batch=batch,
                 device=device,
                 components=components,
-                masks=[masks],
+                masks=[causal_importances],
                 target_out=target_out,
                 loss_type=config.output_loss_type,
             )
@@ -234,10 +235,10 @@ def optimize(
 
         ####### layerwise stochastic masked recon loss #######
         if config.layerwise_stochastic_ci_masked_recon_coeff is not None:
-            layerwise_stochastic_masks = calc_random_masks(
-                masks=masks, n_mask_samples=config.n_mask_samples
+            layerwise_stochastic_masks = calc_stochastic_masks(
+                causal_importances=causal_importances, n_mask_samples=config.n_mask_samples
             )
-            layerwise_stochastic_ci_masked_recon_loss = calc_layerwise_ci_masked_recon_loss(
+            layerwise_stochastic_ci_masked_recon_loss = calc_layerwise_masked_recon_loss(
                 model=model,
                 batch=batch,
                 device=device,
@@ -255,14 +256,16 @@ def optimize(
             )
 
         ####### importance loss #######
-        importance_loss = calc_importance_loss(sparsity_masks=sparsity_masks, pnorm=config.pnorm)
+        importance_loss = calc_importance_loss(
+            ci_upper_leaky=causal_importances_upper_leaky, pnorm=config.pnorm
+        )
         total_loss += config.importance_loss_coeff * importance_loss
         loss_terms["loss/importance_loss"] = importance_loss.item()
 
         ####### Schatten loss #######
         if config.schatten_coeff is not None:
             schatten_loss = calc_schatten_loss(
-                sparsity_masks=sparsity_masks,
+                ci_upper_leaky=causal_importances_upper_leaky,
                 pnorm=config.pnorm,
                 components=components,
                 device=device,
@@ -272,8 +275,8 @@ def optimize(
 
         ####### output recon loss #######
         if config.out_recon_coeff is not None:
-            masks_all_ones = {k: torch.ones_like(v) for k, v in masks.items()}
-            out_recon_loss = calc_ci_masked_recon_loss(
+            masks_all_ones = {k: torch.ones_like(v) for k, v in causal_importances.items()}
+            out_recon_loss = calc_masked_recon_loss(
                 model=model,
                 batch=batch,
                 components=components,
@@ -289,12 +292,14 @@ def optimize(
             assert len(components) == 1, "Only one embedding component is supported"
             component = list(components.values())[0]
             assert isinstance(component, EmbeddingComponent)
-            random_masks = calc_random_masks(masks=masks, n_mask_samples=config.n_mask_samples)
+            stochastic_masks = calc_stochastic_masks(
+                causal_importances=causal_importances, n_mask_samples=config.n_mask_samples
+            )
             embedding_recon_loss = calc_embedding_recon_loss(
                 model=model,
                 batch=batch,
                 component=component,
-                masks=random_masks,
+                masks=stochastic_masks,
                 embed_module_name=next(iter(components.keys())),
                 unembed=config.is_embed_unembed_recon,
             )
@@ -323,7 +328,7 @@ def optimize(
 
                 # Calculate component logits and KL losses
                 masked_component_logits = model.forward_with_components(
-                    batch, components=components, masks=masks
+                    batch, components=components, masks=causal_importances
                 )
                 unmasked_component_logits = model.forward_with_components(
                     batch, components=components, masks=None
@@ -346,21 +351,21 @@ def optimize(
                         model=model,
                         batch=batch,
                         components=components,
-                        masks=masks,
+                        masks=causal_importances,
                         unmasked_component_logits=unmasked_component_logits,
                         masked_component_logits=masked_component_logits,
                         target_logits=target_logits,
                     )
                     log_data.update(ce_losses)
 
-                embed_mask_table = create_embed_mask_sample_table(masks)
-                if embed_mask_table is not None:
-                    log_data["misc/embed_mask_sample"] = embed_mask_table
+                embed_ci_table = create_embed_ci_sample_table(causal_importances)
+                if embed_ci_table is not None:
+                    log_data["misc/embed_ci_sample"] = embed_ci_table
 
                 if config.wandb_project:
-                    mask_l_zero = calc_mask_l_zero(masks=masks)
-                    for layer_name, layer_mask_l_zero in mask_l_zero.items():
-                        log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
+                    ci_l_zero = calc_ci_l_zero(causal_importances=causal_importances)
+                    for layer_name, layer_ci_l_zero in ci_l_zero.items():
+                        log_data[f"{layer_name}/ci_l0"] = layer_ci_l_zero
                     wandb.log(log_data, step=step)
 
             # --- Plotting --- #
@@ -380,8 +385,8 @@ def optimize(
                         device=device,
                     )
 
-                mask_histogram_figs = plot_mask_histograms(masks=masks)
-                fig_dict.update(mask_histogram_figs)
+                ci_histogram_figs = plot_ci_histograms(causal_importances=causal_importances)
+                fig_dict.update(ci_histogram_figs)
 
                 mean_component_activation_counts = component_activation_statistics(
                     model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
