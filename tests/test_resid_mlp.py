@@ -31,18 +31,18 @@ def test_resid_mlp_decomposition_happy_path() -> None:
         # General
         seed=0,
         C=10,  # Smaller C for faster testing
-        n_stochastic_masks=1,
-        n_gate_hidden_neurons=8,
+        n_mask_samples=1,
+        n_ci_mlp_neurons=8,
         target_module_patterns=[
             "layers.*.mlp_in",
             "layers.*.mlp_out",
         ],
         # Loss Coefficients
         faithfulness_coeff=1.0,
-        masked_recon_coeff=2.0,
-        stochastic_masked_recon_coeff=1.0,
-        layerwise_masked_recon_coeff=None,
-        layerwise_stochastic_masked_recon_coeff=None,
+        ci_masked_recon_coeff=2.0,
+        stochastic_ci_masked_recon_coeff=1.0,
+        layerwise_ci_masked_recon_coeff=None,
+        layerwise_stochastic_ci_masked_recon_coeff=None,
         importance_loss_coeff=3e-3,
         schatten_coeff=None,
         embedding_recon_coeff=None,

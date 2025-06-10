@@ -119,7 +119,7 @@ def calc_importance_loss(
     return total_loss.sum(dim=-1).mean()
 
 
-def calc_layerwise_masked_recon_loss(
+def calc_layerwise_ci_masked_recon_loss(
     model: ComponentModel,
     batch: Int[Tensor, "..."],
     device: str,
@@ -148,7 +148,7 @@ def calc_layerwise_masked_recon_loss(
     return total_loss / (n_modified_components * len(masks))
 
 
-def calc_masked_recon_loss(
+def calc_ci_masked_recon_loss(
     model: ComponentModel,
     batch: Float[Tensor, "... d_in"],
     components: dict[str, LinearComponent | EmbeddingComponent],

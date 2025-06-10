@@ -32,7 +32,7 @@ class ComponentModel(nn.Module):
         base_model: nn.Module,
         target_module_patterns: list[str],
         C: int,
-        n_gate_hidden_neurons: int | None,
+        n_ci_mlp_neurons: int,
         pretrained_model_output_attr: str | None,
     ):
         super().__init__()
@@ -43,11 +43,10 @@ class ComponentModel(nn.Module):
             target_module_patterns=target_module_patterns, C=C
         )
 
-        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
-        gate_class = GateMLP if n_gate_hidden_neurons is not None else Gate
+        gate_class = GateMLP if n_ci_mlp_neurons > 0 else Gate
         gate_kwargs = {"C": C}
-        if n_gate_hidden_neurons is not None:
-            gate_kwargs["n_gate_hidden_neurons"] = n_gate_hidden_neurons
+        if n_ci_mlp_neurons > 0:
+            gate_kwargs["n_ci_mlp_neurons"] = n_ci_mlp_neurons
 
         self.gates = nn.ModuleDict({name: gate_class(**gate_kwargs) for name in self.components})
 
@@ -262,7 +261,7 @@ class ComponentModel(nn.Module):
             base_model=base_model,
             target_module_patterns=config.target_module_patterns,
             C=config.C,
-            n_gate_hidden_neurons=config.n_gate_hidden_neurons,
+            n_ci_mlp_neurons=config.n_ci_mlp_neurons,
             pretrained_model_output_attr=config.pretrained_model_output_attr,
         )
         comp_model.load_state_dict(model_weights)

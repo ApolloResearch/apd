@@ -26,9 +26,11 @@ class Gate(nn.Module):
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
 
+    @torch.compile
     def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return lower_leaky_relu(x * self.weight + self.bias)
 
+    @torch.compile
     def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return upper_leaky_relu(x * self.weight + self.bias)
 
@@ -36,17 +38,17 @@ class Gate(nn.Module):
 class GateMLP(nn.Module):
     """A gate with a hidden layer that maps a single input to a single output."""
 
-    def __init__(self, C: int, n_gate_hidden_neurons: int):
+    def __init__(self, C: int, n_ci_mlp_neurons: int):
         super().__init__()
-        self.n_gate_hidden_neurons = n_gate_hidden_neurons
+        self.n_ci_mlp_neurons = n_ci_mlp_neurons
 
-        self.mlp_in = nn.Parameter(torch.empty((C, n_gate_hidden_neurons)))
-        self.in_bias = nn.Parameter(torch.zeros((C, n_gate_hidden_neurons)))
-        self.mlp_out = nn.Parameter(torch.empty((C, n_gate_hidden_neurons)))
+        self.mlp_in = nn.Parameter(torch.empty((C, n_ci_mlp_neurons)))
+        self.in_bias = nn.Parameter(torch.zeros((C, n_ci_mlp_neurons)))
+        self.mlp_out = nn.Parameter(torch.empty((C, n_ci_mlp_neurons)))
         self.out_bias = nn.Parameter(torch.zeros((C,)))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
-        init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
+        init_param_(self.mlp_out, fan_val=n_ci_mlp_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         """Compute the output before applying the final activation function."""
@@ -54,7 +56,7 @@ class GateMLP(nn.Module):
         hidden = einops.einsum(
             x,
             self.mlp_in,
-            "... C, C n_gate_hidden_neurons -> ... C n_gate_hidden_neurons",
+            "... C, C n_ci_mlp_neurons -> ... C n_ci_mlp_neurons",
         )
         hidden = hidden + self.in_bias
         hidden = F.gelu(hidden)
@@ -63,16 +65,16 @@ class GateMLP(nn.Module):
         out = einops.einsum(
             hidden,
             self.mlp_out,
-            "... C n_gate_hidden_neurons, C n_gate_hidden_neurons -> ... C",
+            "... C n_ci_mlp_neurons, C n_ci_mlp_neurons -> ... C",
         )
         out = out + self.out_bias
         return out
 
-    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
+    @torch.compile
     def forward(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return lower_leaky_relu(self._compute_pre_activation(x))
 
-    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
+    @torch.compile
     def forward_unclamped(self, x: Float[Tensor, "... C"]) -> Float[Tensor, "... C"]:
         return upper_leaky_relu(self._compute_pre_activation(x))
 
@@ -101,7 +103,7 @@ class LinearComponent(nn.Module):
         """A @ B"""
         return einops.einsum(self.A, self.B, "d_in C, C d_out -> d_out d_in")
 
-    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
+    # @torch.compile
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         """Forward pass through A and B matrices.
 
@@ -152,7 +154,7 @@ class EmbeddingComponent(nn.Module):
             self.A, self.B, "vocab_size C, ... C embedding_dim -> vocab_size embedding_dim"
         )
 
-    # @torch.compile  # Temporarily disabled to avoid dynamo warnings
+    # @torch.compile
     def forward(self, x: Float[Tensor, "batch pos"]) -> Float[Tensor, "batch pos embedding_dim"]:
         """Forward through the embedding component using nn.Embedding for efficient lookup
 

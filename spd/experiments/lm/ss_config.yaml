@@ -7,16 +7,16 @@ wandb_run_name_prefix: ""
 # --- General ---
 seed: 0
 C: 100
-n_stochastic_masks: 1
-n_gate_hidden_neurons: null
+n_mask_samples: 1
+n_ci_mlp_neurons: 0
 target_module_patterns: ["model.embed_tokens"]
 
 # --- Loss Coefficients ---
 faithfulness_coeff: 1.0
-masked_recon_coeff: null
-stochastic_masked_recon_coeff: null
-layerwise_masked_recon_coeff: null
-layerwise_stochastic_masked_recon_coeff: 1
+ci_masked_recon_coeff: null
+stochastic_ci_masked_recon_coeff: null
+layerwise_ci_masked_recon_coeff: null
+layerwise_stochastic_ci_masked_recon_coeff: 1
 importance_loss_coeff: 1e-6
 schatten_coeff: null
 embedding_recon_coeff: null

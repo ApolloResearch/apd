@@ -8,7 +8,7 @@ parameters:
     values: [0]
   lr:
     values: [2e-3, 1e-3, 3e-4, 1e-4]
-  # layerwise_stochastic_masked_recon_coeff:
+  # layerwise_stochastic_ci_masked_recon_coeff:
   #   values: [1e-1]
   # embedding_recon_coeff:
   #   values: [1, 1e-2, 1e-4]

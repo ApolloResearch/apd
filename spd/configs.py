@@ -7,6 +7,7 @@ from pydantic import (
     ConfigDict,
     Field,
     NonNegativeFloat,
+    NonNegativeInt,
     PositiveFloat,
     PositiveInt,
     model_validator,
@@ -106,17 +107,18 @@ class Config(BaseModel):
         ...,
         description="The number of subcomponents per layer",
     )
-    n_stochastic_masks: PositiveInt = Field(
+    n_mask_samples: PositiveInt = Field(
         ...,
         description="Number of stochastic masks to sample when using stochastic recon losses",
     )
-    n_gate_hidden_neurons: PositiveInt | None = Field(
-        default=None,
-        description="Hidden dimension for the gate MLP; if None, use a single-layer gate",
+    n_ci_mlp_neurons: NonNegativeInt = Field(
+        default=0,
+        description="Number of hidden neurons in the MLP used to calculate the causal importance."
+        "If 0, use a single-layer gate.",
     )
     target_module_patterns: list[str] = Field(
         ...,
-        description="List of fnmatch-style patterns that select nn.Linear / nn.Embedding modules to decompose",
+        description="List of fnmatch-style patterns that select modules to decompose",
     )
 
     # --- Loss Coefficients
@@ -124,21 +126,21 @@ class Config(BaseModel):
         default=1.0,
         description="Coefficient for matching parameters between components and target weights",
     )
-    masked_recon_coeff: NonNegativeFloat | None = Field(
+    ci_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for reconstruction loss with a deterministic mask",
+        description="Coefficient for reconstruction loss with a causal importance mask",
     )
-    stochastic_masked_recon_coeff: NonNegativeFloat | None = Field(
+    stochastic_ci_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for reconstruction loss with stochastic masks",
+        description="Coefficient for reconstruction loss with stochastically sampled masks",
     )
-    layerwise_masked_recon_coeff: NonNegativeFloat | None = Field(
+    layerwise_ci_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for per-layer reconstruction loss (deterministic mask)",
+        description="Coefficient for per-layer reconstruction loss with a causal importance mask",
     )
-    layerwise_stochastic_masked_recon_coeff: NonNegativeFloat | None = Field(
+    layerwise_stochastic_ci_masked_recon_coeff: NonNegativeFloat | None = Field(
         default=None,
-        description="Coefficient for per-layer reconstruction loss with stochastic masks",
+        description="Coefficient for per-layer reconstruction loss with stochastically sampled masks",
     )
     importance_loss_coeff: NonNegativeFloat = Field(
         ...,
@@ -265,8 +267,8 @@ class Config(BaseModel):
     def validate_model(self) -> Self:
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"
-        if self.masked_recon_coeff == 0:
-            logger.warning(f"masked_recon_coeff {msg}")
+        if self.ci_masked_recon_coeff == 0:
+            logger.warning(f"ci_masked_recon_coeff {msg}")
         if self.importance_loss_coeff == 0:
             logger.warning(f"importance_loss_coeff {msg}")
         if self.faithfulness_coeff == 0:
