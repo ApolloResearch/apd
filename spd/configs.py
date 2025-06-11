@@ -81,8 +81,6 @@ class LMTaskConfig(BaseModel):
         default="test",
         description="Name of the dataset split used for evaluation",
     )
-    # TODO: Move to main config when supported by TMS
-    # List of fnmatch patterns for nn.Linear modules to decompose
 
 
 class Config(BaseModel):

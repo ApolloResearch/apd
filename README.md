@@ -1,12 +1,7 @@
-# APD - Attribution-based Parameter Decomposition
-Code used in the paper [Interpretability in Parameter Space: Minimizing
-Mechanistic Description Length with
-Attribution-based Parameter Decomposition](https://publications.apolloresearch.ai/apd)
+# SPD - Stochastic Parameter Decomposition
+Code used in the paper [Stochastic Parameter Decomposition (forthcoming)](TODO)
 
-Weights and Bias report accompanying the paper: https://api.wandb.ai/links/apollo-interp/h5ekyxm7
-
-Note: previously called Sparse Parameter Decomposition (SPD). The package name will remain as `spd`
-for now, but the repository has been renamed to `apd`.
+Weights and Bias [report](https://wandb.ai/apollo-interp/spd-tms/reports/SPD-paper-report--VmlldzoxMzE0NzE1OA?accessToken=h7mgfw2k37gfyssr65fn2960w9yz53jge7uz9oxugbbl28di4a0xep5kpgbf4z8g) accompanying the paper.
 
 ## Installation
 From the root of the repository, run one of
@@ -19,22 +14,15 @@ make install  # To just install the package (runs `pip install -e .`)
 ## Usage
 Place your wandb information in a .env file. You can use the .env.example file as an example.
 
-The repository consists of several `experiments`, each of which containing scripts to train target
-models and run APD.
+The repository consists of several `experiments`, each of which containing scripts to run SPD,
+analyse results, and optionally a train a target model:
 - `spd/experiments/tms` - Toy model of superposition
 - `spd/experiments/resid_mlp` - Toy model of compressed computation and toy model of distributed
   representations
+- `spd/experiments/lm` - Language model loaded from huggingface.
 
-Deprecated:
-- `spd/experiments/piecewise` - Handcoded gated function model. Use [this](117284172497ca420f22c29cef3ddcd5e4bcceb8) commit if you need to use
-  this experiment.
-
-### Train a target model
-All experiments require training a target model. Look for the `train_*.py` script in the experiment
-directory. Your trained model will be saved locally and uploaded to wandb.
-
-### Run APD
-APD can be run by executing any of the `*_decomposition.py` scripts defined in the experiment
+### Run DPD
+SPD can be run by executing any of the `*_decomposition.py` scripts defined in the experiment
 subdirectories. A config file is required for each experiment, which can be found in the same
 directory. For example:
 ```bash
@@ -48,10 +36,7 @@ Wandb sweep files are also provided in the experiment subdirectories, and can be
 wandb sweep spd/experiments/tms/tms_sweep_config.yaml
 ```
 
-All experiments call the `optimize` function in `spd/run_spd.py`, which contains the main APD logic.
-
-### Analyze results
-Experiments contain `*_interp.py` scripts which generate the plots used in the paper.
+All experiments call the `optimize` function in `spd/run_spd.py`, which contains the main SPD logic.
 
 ## Development
 

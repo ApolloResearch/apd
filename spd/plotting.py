@@ -29,7 +29,6 @@ def permute_to_identity(
         raise ValueError(f"Mask must have 2 dimensions, got {ci_vals.ndim}")
 
     batch, C = ci_vals.shape
-    new_mask = ci_vals.clone()
     effective_rows = min(batch, C)
     perm_indices = torch.zeros(C, dtype=torch.long, device=ci_vals.device)
 
