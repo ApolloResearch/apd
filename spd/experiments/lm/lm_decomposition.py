@@ -49,7 +49,11 @@ def plot_lm_results(
 
 
 def main(
-    config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
+    config_path_or_obj: Path | str | Config,
+    sweep_config_path: Path | str | None = None,
+    # due to pytorch vuln https://nvd.nist.gov/vuln/detail/CVE-2025-32434
+    # hf `transformers` library doesn't allow loading with weights_only=True
+    weights_only: bool = True,
 ) -> None:
     config = load_config(config_path_or_obj, config_model=Config)
 
@@ -72,6 +76,7 @@ def main(
         path_to_class=config.pretrained_model_class,
         model_path=None,
         model_name_hf=config.pretrained_model_name_hf,
+        weights_only=weights_only,
     )
 
     # --- Setup Run Name and Output Dir --- #
