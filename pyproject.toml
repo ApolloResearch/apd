@@ -5,7 +5,7 @@ description = "Sparse Parameter Decomposition"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-    "torch<2.6.0",
+    "torch>2.4.1,<2.6.0",
     "torchvision",
     "pydantic",
     "wandb",
