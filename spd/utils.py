@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
+import wandb
 from jaxtyping import Float
 from pydantic import BaseModel, PositiveFloat
 from pydantic.v1.utils import deep_update
@@ -210,13 +211,23 @@ def load_pretrained(
     model_cls = resolve_class(path_to_class)
     if not hasattr(model_cls, "from_pretrained"):
         raise TypeError(f"{model_cls} lacks a `from_pretrained` method.")
-    return model_cls.from_pretrained(model_path or model_name_hf, **kwargs)  # type: ignore
+    # Artifact paths are weird to handle, but they are a requirement for folders
+    if model_path is not None and isinstance(model_path, str) and str(model_path).startswith("wandb:") and str(model_path).split(":")[-1].startswith("v"):
+        api = wandb.Api()
+
+        artifact = api.artifact(str(model_path).replace("wandb:", ""), type="model")
+        checkpoint_dir = artifact.download()
+        logger.info(f"Downloaded model artifact to {checkpoint_dir}")
+
+        return model_cls.from_pretrained(checkpoint_dir + "/model", **kwargs) # type: ignore
+    else:
+        return model_cls.from_pretrained(model_path or model_name_hf, **kwargs)  # type: ignore
 
 
 def extract_batch_data(
     batch_item: dict[str, Any] | tuple[torch.Tensor, ...] | torch.Tensor,
     input_key: str = "input_ids",
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Extract input data from various batch formats.
 
     This utility function handles different batch formats commonly used across the codebase:
@@ -238,17 +249,23 @@ def extract_batch_data(
             raise KeyError(
                 f"Key '{input_key}' not found in batch. Available keys: {available_keys}"
             )
-        tensor = batch_item[input_key]
+        tensor = batch_item[input_key].squeeze(1)
+        labels = batch_item.get("labels", None)
     elif isinstance(batch_item, tuple):
         # Assume input is the first element
         tensor = batch_item[0]
+        if len(batch_item) > 1:
+            labels = batch_item[1].squeeze(1) if batch_item[1] is not None else None
+        else:
+            labels = None
     elif isinstance(batch_item, torch.Tensor):
         # Direct tensor format
         tensor = batch_item
+        labels = None
     else:
         raise TypeError(f"Unsupported batch format: {type(batch_item)}. ")
 
-    return tensor
+    return tensor, labels
 
 
 def calc_kl_divergence_lm(

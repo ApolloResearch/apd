@@ -1,0 +1,29 @@
+# Model
+pretrained_model_path: "google/vit-base-patch16-224" # HF
+
+# Dataset
+dataset_path: "zh-plus/tiny-imagenet" # HF
+train_split: "train"
+eval_split: "valid"
+test_split: "valid"
+
+# All labels in the same group will be considered the same class, e.g. [0, 1, 2] means that classes 0, 1, and 2 are grouped together
+# All other labels will be considered "not"; the number of groups n then constitute an n+1 classification task
+
+# All CAT labels in regular imageNet
+# grouped_labels: [[281, 282, 283, 284, 285, 286, 287]]
+
+# Brown bear in tiny imagenet
+grouped_labels: [[32]]
+
+# Training
+batch_size: 16
+lr: 1e-3
+lr_schedule: cosine
+max_train_steps: 200
+n_eval_steps: 190
+weight_decay: 0.01
+num_workers: 8
+
+# Logging
+wandb_project: spd-vision

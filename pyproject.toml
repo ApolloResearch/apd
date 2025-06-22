@@ -24,6 +24,7 @@ dependencies = [
     "streamlit",
     "streamlit-antd-components",
     "datasets",
+    "timm (>=1.0.15,<2.0.0)",
 ]
 
 [project.optional-dependencies]

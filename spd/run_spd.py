@@ -76,6 +76,7 @@ def optimize(
     out_dir: Path | None,
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     tied_weights: list[tuple[str, str]] | None = None,
+    batch_key: str = "input_ids",
 ) -> None:
     """Run the optimization loop for LM decomposition."""
 
@@ -153,12 +154,12 @@ def optimize(
 
         try:
             batch_item = next(data_iter)
-            batch = extract_batch_data(batch_item)
+            batch, labels = extract_batch_data(batch_item, input_key=batch_key)
         except StopIteration:
             logger.warning("Dataloader exhausted, resetting iterator.")
             data_iter = iter(train_loader)
             batch_item = next(data_iter)
-            batch = extract_batch_data(batch_item)
+            batch, labels = extract_batch_data(batch_item, input_key=batch_key)
         batch = batch.to(device)
 
         target_out, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
@@ -336,41 +337,60 @@ def optimize(
                 )
 
                 if config.log_ce_losses:
-                    ###### CE vs true labels #######
-                    flat_all_component_logits = einops.rearrange(
-                        unmasked_component_logits, "... vocab -> (...) vocab"
-                    )
-                    flat_masked_component_logits = einops.rearrange(
-                        masked_component_logits, "... vocab -> (...) vocab"
-                    )
-                    flat_batch = batch.flatten()
-                    unmasked_ce_loss = F.cross_entropy(
-                        input=flat_all_component_logits[:-1], target=flat_batch[1:]
-                    )
-                    masked_ce_loss = F.cross_entropy(
-                        input=flat_masked_component_logits[:-1], target=flat_batch[1:]
-                    )
+                    if config.task_config.task_name == "lm":
+                        ###### CE vs true labels #######
+                        flat_all_component_logits = einops.rearrange(
+                            unmasked_component_logits, "... vocab -> (...) vocab"
+                        )
+                        flat_masked_component_logits = einops.rearrange(
+                            masked_component_logits, "... vocab -> (...) vocab"
+                        )
+                        flat_batch = batch.flatten()
+                        unmasked_ce_loss = F.cross_entropy(
+                            input=flat_all_component_logits[:-1], target=flat_batch[1:]
+                        )
+                        masked_ce_loss = F.cross_entropy(
+                            input=flat_masked_component_logits[:-1], target=flat_batch[1:]
+                        )
 
-                    flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
-                    target_ce_loss = F.cross_entropy(
-                        input=flat_target_logits[:-1], target=flat_batch[1:]
-                    )
+                        flat_target_logits = einops.rearrange(target_logits, "... vocab -> (...) vocab")
+                        target_ce_loss = F.cross_entropy(
+                            input=flat_target_logits[:-1], target=flat_batch[1:]
+                        )
 
-                    # --- CE when every component is fully masked (all-zero masks) --- #
-                    zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
-                    zero_masked_component_logits = model.forward_with_components(
-                        batch, components=components, masks=zero_masks
-                    )
-                    flat_zero_masked_component_logits = einops.rearrange(
-                        zero_masked_component_logits, "... vocab -> (...) vocab"
-                    )
-                    zero_masked_ce_loss = F.cross_entropy(
-                        input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
-                    )
-                    log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
-                    log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
-                    log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
-                    log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+                        # --- CE when every component is fully masked (all-zero masks) --- #
+                        zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+                        zero_masked_component_logits = model.forward_with_components(
+                            batch, components=components, masks=zero_masks
+                        )
+                        flat_zero_masked_component_logits = einops.rearrange(
+                            zero_masked_component_logits, "... vocab -> (...) vocab"
+                        )
+                        zero_masked_ce_loss = F.cross_entropy(
+                            input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+                        )
+                        log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                        log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                        log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                        log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+                    elif config.task_config.task_name == "vision":
+                        if isinstance(labels, Tensor):
+                            labels = labels.to(device)
+                            # For vision tasks, we can use the logits directly
+                            unmasked_ce_loss = F.cross_entropy(
+                                input=unmasked_component_logits, target=labels
+                            )
+                            masked_ce_loss = F.cross_entropy(
+                                input=masked_component_logits, target=labels
+                            )
+                            target_ce_loss = F.cross_entropy(input=target_logits, target=labels)
+                            log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                            log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                            log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                    else:
+                        raise ValueError(
+                            f"Unsupported task {config.task_config.task_name} for CE loss logging."
+                        )
 
                 embed_mask_table = create_embed_mask_sample_table(masks)
                 if embed_mask_table is not None:
@@ -407,7 +427,7 @@ def optimize(
                 fig_dict.update(mask_histogram_figs)
 
                 mean_component_activation_counts = component_activation_statistics(
-                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device, input_key=batch_key,
                 )[1]
                 assert mean_component_activation_counts is not None
                 fig_dict["mean_component_activation_counts"] = (

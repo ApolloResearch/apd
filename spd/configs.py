@@ -83,6 +83,29 @@ class LMTaskConfig(BaseModel):
     # TODO: Move to main config when supported by TMS
     # List of fnmatch patterns for nn.Linear modules to decompose
 
+class VisionTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["vision"] = Field(
+        default="vision",
+        description="Identifier for the vision decomposition task",
+    )
+    dataset_name: str = Field(
+        default="cifar10",
+        description="HuggingFace dataset identifier to use for the vision task",
+    )
+    train_data_split: str = Field(
+        default="train",
+        description="Name of the dataset split used for training",
+    )
+    eval_data_split: str = Field(
+        default="test",
+        description="Name of the dataset split used for evaluation",
+    )
+    grouped_labels: list[list[int]] = Field(
+        default_factory=lambda: [],
+        description="List of labels to combine into single labels"
+    )
+
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -242,7 +265,7 @@ class Config(BaseModel):
     )
 
     # --- Task Specific ---
-    task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig = Field(
+    task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig | VisionTaskConfig = Field(
         ...,
         discriminator="task_name",
         description="Nested task-specific configuration selected by the `task_name` discriminator",

@@ -1,13 +1,14 @@
 from typing import Any
 
+from PIL import Image
 import numpy as np
 import torch
-from datasets import Dataset, IterableDataset, load_dataset
+from datasets import Dataset, IterableDataset, load_dataset, concatenate_datasets
 from datasets.distributed import split_dataset_by_node
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, PreTrainedTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerBase, default_data_collator
 
 """
 The bulk of this file is copied from https://github.com/ApolloResearch/e2e_sae
@@ -28,6 +29,15 @@ class DatasetConfig(BaseModel):
     """The name of the column in the dataset that contains the data (tokenized or non-tokenized).
     Typically 'input_ids' for datasets stored with e2e_sae/scripts/upload_hf_dataset.py, or "tokens"
     for datasets tokenized in TransformerLens (e.g. NeelNanda/pile-10k)."""
+
+
+class VisionDatasetConfig(BaseModel):
+    name: str = "ILSVRC/imagenet-1k"
+    split: str = "train"
+    streaming: bool = False
+    seed: int | None = None
+    buffer_size: int = 1000  # only used if streaming
+    hf_image_processor_path: str | None = None
 
 
 def _keep_single_column(dataset: Dataset, col_name: str) -> Dataset:
@@ -210,3 +220,93 @@ def create_data_loader(
         drop_last=True,
     )
     return loader, tokenizer
+
+
+def create_image_data_loader(
+    ds_cfg: VisionDatasetConfig,
+    batch_size: int,
+    grouped_labels: list[list[int]],
+    buffer_size: int | None = None,
+    global_seed: int = 0,
+    ddp_rank: int = 0,
+    ddp_world_size: int = 1,
+    trust_remote_code: bool = False,
+    shuffle: bool = False,
+    balanced: bool = False,
+) -> tuple[DataLoader[Any], PreTrainedTokenizerBase]:
+    """Load vision dataset, remap labels, return DataLoader & processor."""
+
+    # 1. Load dataset ---------------------------------------------------
+    dataset = load_dataset(
+        ds_cfg.name,
+        streaming=ds_cfg.streaming,
+        split=ds_cfg.split,
+        trust_remote_code=trust_remote_code,
+    )
+
+    # 2. Shuffle / seed handling ---------------------------------------
+    seed = ds_cfg.seed if ds_cfg.seed is not None else global_seed
+    if ds_cfg.streaming:
+        assert isinstance(dataset, IterableDataset)
+        dataset = dataset.shuffle(seed=seed, buffer_size=buffer_size or ds_cfg.buffer_size)
+    else:
+        dataset = dataset.shuffle(seed=seed)
+
+    # 3. DDP split ------------------------------------------------------
+    dataset = split_dataset_by_node(dataset, ddp_rank, ddp_world_size)  # type: ignore
+
+    # 4. Label mapping --------------------------------------------------
+    group_label_map = {lbl: gi for gi, grp in enumerate(grouped_labels) for lbl in grp}
+    not_label = len(grouped_labels)
+
+    def _remap(ex): # type: ignore
+        orig = ex["label"]
+        ex["label"] = group_label_map.get(orig, not_label)
+        return ex
+
+    dataset = dataset.map(_remap, batched=False, num_proc=10)
+    label_counts = np.bincount(dataset["label"], minlength=not_label + 1)
+
+    if balanced:
+        labels = dataset["label"]
+        label_counts = np.bincount(labels, minlength=not_label + 1)
+        max_count = min(label_counts)
+        not_label_samples = dataset.filter(lambda ex: ex["label"] == not_label)
+        not_label_samples = not_label_samples.shuffle(seed=seed).select(range(max_count))
+        label_samples = dataset.filter(lambda ex: ex["label"] != not_label)
+        dataset = concatenate_datasets(
+            [
+                not_label_samples,
+                label_samples,
+            ]
+        )
+
+    # 5. Image processor ------------------------------------------------
+    proc_path = ds_cfg.hf_image_processor_path or ds_cfg.name.split("/")[-1]
+    processor = AutoImageProcessor.from_pretrained(proc_path)
+
+    def _proc(ex): # type: ignore
+        # CHeck if it is a PIL image
+        image = ex["image"]
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(image)
+
+        # Convert grayscale or other modes to RGB
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        ex.update(processor(image), return_tensors="pt")
+        ex.pop("image")
+        return ex
+
+    dataset = dataset.map(_proc, batched=False)
+    dataset.set_format("torch")
+
+    # 6. DataLoader -----------------------------------------------------
+    loader = DataLoader(
+        dataset,  # type: ignore
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=True,
+        collate_fn=default_data_collator,
+    )
+    return loader, processor

@@ -103,6 +103,7 @@ def component_activation_statistics(
     | DataLoader[tuple[Float[Tensor, "..."], Float[Tensor, "..."]]],
     n_steps: int,
     device: str,
+    input_key: str = "input_ids",
 ) -> tuple[dict[str, float], dict[str, Float[Tensor, " m"]]]:
     """Get the number and strength of the masks over the full dataset."""
     # We used "-" instead of "." as module names can't have "." in them
@@ -122,7 +123,11 @@ def component_activation_statistics(
     data_iter = iter(dataloader)
     for _ in range(n_steps):
         # --- Get Batch --- #
-        batch = extract_batch_data(next(data_iter))
+        try:
+            batch, _ = extract_batch_data(next(data_iter), input_key=input_key)
+        except StopIteration:
+            # if we run out, we just stop
+            break
         batch = batch.to(device)
 
         _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
